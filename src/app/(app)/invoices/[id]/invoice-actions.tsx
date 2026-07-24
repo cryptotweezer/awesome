@@ -8,6 +8,7 @@ import {
   markPaidAction,
   markUnpaidAction,
   cancelInvoiceAction,
+  reactivateInvoiceAction,
   deleteInvoiceAction,
   type ActionState,
 } from "./actions";
@@ -22,13 +23,20 @@ export function InvoiceActions({
   status: InvoiceStatus;
 }) {
   const router = useRouter();
-  const [paidState, paid, paidPending] = useActionState(markPaidAction, initial);
+  const [paidState, paid, paidPending] = useActionState(
+    markPaidAction,
+    initial,
+  );
   const [unpaidState, unpaid, unpaidPending] = useActionState(
     markUnpaidAction,
     initial,
   );
   const [cancelState, cancel, cancelPending] = useActionState(
     cancelInvoiceAction,
+    initial,
+  );
+  const [reactivateState, reactivate, reactivatePending] = useActionState(
+    reactivateInvoiceAction,
     initial,
   );
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -40,6 +48,7 @@ export function InvoiceActions({
     paidState.error ||
     unpaidState.error ||
     cancelState.error ||
+    reactivateState.error ||
     deleteError;
 
   function onDelete() {
@@ -70,38 +79,70 @@ export function InvoiceActions({
         </form>
       )}
 
-      {(status === "paid" || status === "partial") && (
+      {status === "paid" && (
         <form action={unpaid}>
           <input type="hidden" name="id" value={id} />
           <button
             disabled={unpaidPending}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
           >
             {unpaidPending ? "…" : "Mark as unpaid"}
           </button>
         </form>
       )}
 
+      {/* Rendered on demand by /invoices/[id]/pdf — nothing is stored. */}
+      <a
+        href={`/invoices/${id}/pdf`}
+        className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+      >
+        Download PDF
+      </a>
+
+      <a
+        href={`/invoices/${id}/pdf?inline=1`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+      >
+        Print
+      </a>
+
       <Link
         href={`/invoices/${id}/edit`}
-        className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
       >
         Edit invoice
       </Link>
+
+      {/* Undo a cancellation done by mistake — the status re-derives itself. */}
+      {status === "cancelled" && (
+        <form action={reactivate}>
+          <input type="hidden" name="id" value={id} />
+          <button
+            disabled={reactivatePending}
+            className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
+          >
+            {reactivatePending ? "…" : "Reactivate invoice"}
+          </button>
+        </form>
+      )}
 
       {status !== "cancelled" && (
         <>
           {!confirmingCancel ? (
             <button
               onClick={() => setConfirmingCancel(true)}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
+              className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
             >
               Cancel invoice
             </button>
           ) : (
             <form action={cancel} className="flex items-center gap-2">
               <input type="hidden" name="id" value={id} />
-              <span className="text-sm text-slate-500">Cancel this invoice?</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                Cancel this invoice?
+              </span>
               <button
                 disabled={cancelPending}
                 className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
@@ -111,7 +152,7 @@ export function InvoiceActions({
               <button
                 type="button"
                 onClick={() => setConfirmingCancel(false)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 No
               </button>
@@ -124,7 +165,7 @@ export function InvoiceActions({
       {!confirmingDelete ? (
         <button
           onClick={() => setConfirmingDelete(true)}
-          className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/50"
         >
           Delete invoice
         </button>
@@ -144,7 +185,7 @@ export function InvoiceActions({
           <button
             type="button"
             onClick={() => setConfirmingDelete(false)}
-            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             No
           </button>

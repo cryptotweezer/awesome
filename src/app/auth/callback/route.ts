@@ -35,7 +35,8 @@ export async function GET(request: Request) {
   // Respect proxy host in production (e.g. Vercel) for the final redirect.
   const forwardedHost = request.headers.get("x-forwarded-host");
   const isLocalEnv = process.env.NODE_ENV === "development";
-  const base = !isLocalEnv && forwardedHost ? `https://${forwardedHost}` : origin;
+  const base =
+    !isLocalEnv && forwardedHost ? `https://${forwardedHost}` : origin;
 
   return NextResponse.redirect(`${base}${next}`);
 }

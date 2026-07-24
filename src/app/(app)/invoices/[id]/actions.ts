@@ -5,6 +5,7 @@ import {
   getInvoice,
   setInvoicePaidAmount,
   setInvoiceStatus,
+  reactivateInvoice,
   updateInvoice,
   deleteInvoice,
 } from "@/lib/data/invoices";
@@ -87,9 +88,38 @@ export async function cancelInvoiceAction(
 }
 
 /** Same as cancelInvoiceAction but called directly by id (history quick-action). */
-export async function cancelInvoiceByIdAction(id: string): Promise<ActionState> {
+export async function cancelInvoiceByIdAction(
+  id: string,
+): Promise<ActionState> {
   try {
     await setInvoiceStatus(id, "cancelled");
+    await refresh(id);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+  }
+}
+
+export async function reactivateInvoiceAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = formData.get("id") as string;
+  try {
+    await reactivateInvoice(id);
+    await refresh(id);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+  }
+}
+
+/** Same as reactivateInvoiceAction but called directly by id (history menu). */
+export async function reactivateInvoiceByIdAction(
+  id: string,
+): Promise<ActionState> {
+  try {
+    await reactivateInvoice(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {

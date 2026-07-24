@@ -13,9 +13,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Awesome Cleaning — Billing",
-  description: "Internal billing & invoicing dashboard for Awesome Cleaning.",
+  title: "Awesome Services — Billing",
+  description: "Internal billing & invoicing dashboard for Awesome Services.",
 };
+
+/**
+ * Applies the saved theme before the first paint, so switching pages or
+ * reloading never flashes the wrong one. The ThemeToggle reads and writes the
+ * same `dark` class on <html>.
+ */
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}else{document.documentElement.classList.remove('dark')}}catch(e){}})()`;
 
 export default function RootLayout({
   children,
@@ -26,7 +33,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

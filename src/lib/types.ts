@@ -2,7 +2,9 @@
 // Kept hand-written (not generated) so this repo stays isolated from the
 // resume/pis schemas that share the same Supabase project.
 
-export type InvoiceStatus = "unpaid" | "partial" | "paid" | "cancelled";
+// Clients always pay the full invoice — there is no partial state. Anything
+// unusual about a payment goes in `internal_notes`.
+export type InvoiceStatus = "unpaid" | "paid" | "cancelled";
 
 export interface Issuer {
   id: string;

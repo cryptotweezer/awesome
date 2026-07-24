@@ -15,20 +15,22 @@ export default async function NewInvoicePage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             New invoice
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Pick a client — the ABN, service and rate autofill. Add extra lines
-            if needed.
-          </p>
+          {nextNumber != null && (
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              This invoice will be #{nextNumber} — the final number is assigned
+              when you save.
+            </p>
+          )}
         </div>
         {nextNumber != null && (
-          <div className="rounded-xl bg-white px-4 py-2 text-right shadow-sm ring-1 ring-slate-200">
-            <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          <div className="rounded-xl bg-white dark:bg-slate-900 px-4 py-2 text-right shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
+            <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Next invoice #
             </span>
-            <span className="block text-lg font-bold tabular-nums text-slate-900">
+            <span className="block text-lg font-bold tabular-nums text-slate-900 dark:text-slate-100">
               {nextNumber}
             </span>
           </div>
@@ -38,7 +40,6 @@ export default async function NewInvoicePage() {
       <InvoiceForm
         clients={clients}
         issuers={issuers}
-        nextNumber={nextNumber}
         action={createInvoiceAction}
       />
     </div>

@@ -5,29 +5,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InvoiceListRow } from "@/lib/data/invoices";
 import type { InvoiceStatus } from "@/lib/types";
-import { formatAUD, formatDate } from "@/lib/format";
+import { formatAUD, formatDate, todayInSydney } from "@/lib/format";
 import {
   markPaidByIdAction,
   markUnpaidByIdAction,
   cancelInvoiceByIdAction,
+  reactivateInvoiceByIdAction,
   deleteInvoiceAction,
   type ActionState,
 } from "../invoices/[id]/actions";
 
 const STATUS_STYLES: Record<InvoiceStatus, string> = {
-  unpaid: "bg-amber-100 text-amber-700",
-  partial: "bg-blue-100 text-blue-700",
-  paid: "bg-green-100 text-green-700",
-  cancelled: "bg-slate-200 text-slate-500",
+  unpaid: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  paid: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+  cancelled:
+    "bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 };
 
-const today = new Date().toISOString().slice(0, 10);
+const today = todayInSydney();
 
 function isOverdue(inv: InvoiceListRow) {
-  return (
-    (inv.status === "unpaid" || inv.status === "partial") &&
-    inv.due_date < today
-  );
+  return inv.status === "unpaid" && inv.due_date < today;
 }
 
 function serviceDates(inv: InvoiceListRow) {
@@ -41,7 +39,17 @@ function serviceDates(inv: InvoiceListRow) {
   return extra > 0 ? `${label} (+${extra})` : label;
 }
 
+/** Which table the filter bar acts on. The other one stays whole. */
+type Scope = "outstanding" | "closed" | "both";
+
+const SCOPE_STATUSES: Record<Scope, InvoiceStatus[]> = {
+  outstanding: ["unpaid"],
+  closed: ["paid", "cancelled"],
+  both: ["unpaid", "paid", "cancelled"],
+};
+
 export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
+  const [scope, setScope] = useState<Scope>("both");
   const [client, setClient] = useState("all");
   const [status, setStatus] = useState("all");
   const [abn, setAbn] = useState("all");
@@ -53,21 +61,82 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
     [invoices],
   );
 
-  const rows = invoices.filter((i) => {
+  function matches(i: InvoiceListRow) {
     if (client !== "all" && i.bill_to_name !== client) return false;
     if (status !== "all" && i.status !== status) return false;
     if (abn !== "all" && i.issuer?.short_name !== abn) return false;
     if (dateFrom && i.invoice_date < dateFrom) return false;
     if (dateTo && i.invoice_date > dateTo) return false;
     return true;
-  });
+  }
 
-  const totalOutstanding = rows
-    .filter((i) => i.status === "unpaid" || i.status === "partial")
-    .reduce((sum, i) => sum + Number(i.balance_due), 0);
+  /** A status that no longer exists in the new scope would blank the table. */
+  function changeScope(next: Scope) {
+    setScope(next);
+    if (
+      status !== "all" &&
+      !SCOPE_STATUSES[next].includes(status as InvoiceStatus)
+    ) {
+      setStatus("all");
+    }
+  }
+
+  const filtered =
+    client !== "all" ||
+    status !== "all" ||
+    abn !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  // Two buckets so the page doesn't become one endless list: what still needs
+  // chasing on top (always fully visible), everything settled below (scrolls).
+  const allOutstanding = invoices.filter((i) => i.status === "unpaid");
+  // Closed invoices are an archive that only grows — newest first, otherwise
+  // the most recent one would always sit at the bottom of the scroll box.
+  const allClosed = invoices
+    .filter((i) => i.status === "paid" || i.status === "cancelled")
+    .slice()
+    .reverse();
+
+  const inScope = (s: Scope) => scope === s || scope === "both";
+  const outstanding = inScope("outstanding")
+    ? allOutstanding.filter(matches)
+    : allOutstanding;
+  const closed = inScope("closed") ? allClosed.filter(matches) : allClosed;
+
+  const totalOutstanding = outstanding.reduce(
+    (sum, i) => sum + Number(i.balance_due),
+    0,
+  );
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          Filter
+        </span>
+        <div className="flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5">
+          <ScopeTab
+            active={scope === "outstanding"}
+            onClick={() => changeScope("outstanding")}
+          >
+            To be paid
+          </ScopeTab>
+          <ScopeTab
+            active={scope === "closed"}
+            onClick={() => changeScope("closed")}
+          >
+            Paid &amp; cancelled
+          </ScopeTab>
+          <ScopeTab
+            active={scope === "both"}
+            onClick={() => changeScope("both")}
+          >
+            Both
+          </ScopeTab>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3">
         <Select value={client} onChange={setClient} label="Client">
           <option value="all">All clients</option>
@@ -79,10 +148,11 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
         </Select>
         <Select value={status} onChange={setStatus} label="Status">
           <option value="all">All statuses</option>
-          <option value="unpaid">Unpaid</option>
-          <option value="partial">Partial</option>
-          <option value="paid">Paid</option>
-          <option value="cancelled">Cancelled</option>
+          {SCOPE_STATUSES[scope].map((st) => (
+            <option key={st} value={st}>
+              {st[0].toUpperCase() + st.slice(1)}
+            </option>
+          ))}
         </Select>
         <Select value={abn} onChange={setAbn} label="ABN">
           <option value="all">Both ABNs</option>
@@ -90,24 +160,28 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
           <option value="Andres">Andres</option>
         </Select>
 
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <span className="text-xs font-medium text-slate-500">From</span>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            From
+          </span>
           <input
             type="date"
             value={dateFrom}
             max={dateTo || undefined}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
           />
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <span className="text-xs font-medium text-slate-500">To</span>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            To
+          </span>
           <input
             type="date"
             value={dateTo}
             min={dateFrom || undefined}
             onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
           />
         </label>
         {(dateFrom || dateTo) && (
@@ -117,23 +191,132 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
               setDateFrom("");
               setDateTo("");
             }}
-            className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100"
+            className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             Clear dates
           </button>
         )}
 
-        <div className="ml-auto text-sm text-slate-600">
+        <div className="ml-auto text-sm text-slate-600 dark:text-slate-400">
           Outstanding:{" "}
-          <span className="font-semibold text-slate-900">
+          <span className="font-semibold text-slate-900 dark:text-slate-100">
             {formatAUD(totalOutstanding)}
           </span>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+      <InvoiceTable
+        title="To be paid"
+        rows={outstanding}
+        filtered={filtered && inScope("outstanding")}
+        empty={
+          invoices.length === 0 ? (
+            <>
+              No invoices yet. Create the first one with{" "}
+              <Link href="/invoices/new" className="underline">
+                New invoice
+              </Link>
+              .
+            </>
+          ) : filtered && inScope("outstanding") ? (
+            "No invoices match these filters."
+          ) : (
+            "🎉 Nothing to chase — everything is paid."
+          )
+        }
+      />
+
+      <InvoiceTable
+        title="Paid & cancelled"
+        rows={closed}
+        scrollable
+        filtered={filtered && inScope("closed")}
+        empty={
+          filtered && inScope("closed")
+            ? "No invoices match these filters."
+            : "Nothing settled yet."
+        }
+      />
+    </div>
+  );
+}
+
+function ScopeTab({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+        active
+          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100"
+          : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Rows in the closed bucket before it stops growing and scrolls internally. */
+const CLOSED_MAX_HEIGHT = "28rem"; // ≈ 10 rows + header
+
+function InvoiceTable({
+  title,
+  rows,
+  empty,
+  scrollable = false,
+  filtered = false,
+}: {
+  title: string;
+  rows: InvoiceListRow[];
+  empty: React.ReactNode;
+  scrollable?: boolean;
+  /** Marks the table the filter bar is currently acting on. */
+  filtered?: boolean;
+}) {
+  const total = rows.reduce((sum, i) => sum + Number(i.total), 0);
+
+  return (
+    <div className="rounded-2xl bg-white dark:bg-slate-900 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
+      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            {title}
+          </h2>
+          {filtered && (
+            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+              filtered
+            </span>
+          )}
+        </div>
+        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+          {rows.length} {rows.length === 1 ? "invoice" : "invoices"} ·{" "}
+          {formatAUD(total)}
+        </span>
+      </div>
+
+      <div
+        className="overflow-x-auto"
+        style={
+          scrollable
+            ? { maxHeight: CLOSED_MAX_HEIGHT, overflowY: "auto" }
+            : undefined
+        }
+      >
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <thead
+            className={`border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 ${
+              scrollable ? "sticky top-0 z-10 bg-white dark:bg-slate-900" : ""
+            }`}
+          >
             <tr>
               <th className="px-4 py-3 font-medium">No.</th>
               <th className="px-4 py-3 font-medium">ABN</th>
@@ -148,15 +331,14 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
               <th className="px-4 py-3 text-right font-medium">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-10 text-center text-slate-400">
-                  No invoices yet. Create the first one with{" "}
-                  <Link href="/invoices/new" className="underline">
-                    New invoice
-                  </Link>
-                  .
+                <td
+                  colSpan={11}
+                  className="px-4 py-10 text-center text-slate-400 dark:text-slate-500"
+                >
+                  {empty}
                 </td>
               </tr>
             )}
@@ -165,36 +347,47 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
               return (
                 <tr
                   key={inv.id}
-                  className={overdue ? "bg-red-50/60" : "hover:bg-slate-50"}
+                  className={
+                    overdue
+                      ? "bg-red-50/60 dark:bg-red-950/25"
+                      : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }
                 >
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    <Link href={`/invoices/${inv.id}`} className="hover:underline">
+                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+                    <Link
+                      href={`/invoices/${inv.id}`}
+                      className="hover:underline"
+                    >
                       {inv.invoice_number}
                     </Link>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                    <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
                       {inv.issuer?.short_name ?? "—"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-900">{inv.bill_to_name}</td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-4 py-3 text-slate-900 dark:text-slate-100">
+                    {inv.bill_to_name}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                     {inv.bill_to_suburb ?? "—"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                     {formatDate(inv.invoice_date)}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                     {serviceDates(inv)}
                   </td>
                   <td
                     className={`px-4 py-3 ${
-                      overdue ? "font-medium text-red-600" : "text-slate-600"
+                      overdue
+                        ? "font-medium text-red-600 dark:text-red-400"
+                        : "text-slate-600 dark:text-slate-400"
                     }`}
                   >
                     {formatDate(inv.due_date)}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-slate-900">
+                  <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
                     {formatAUD(Number(inv.total))}
                   </td>
                   <td className="px-4 py-3">
@@ -228,7 +421,8 @@ function NoteCell({ note }: { note: string | null }) {
   );
   const ref = useRef<HTMLSpanElement>(null);
 
-  if (!note) return <span className="text-slate-400">—</span>;
+  if (!note)
+    return <span className="text-slate-400 dark:text-slate-500">—</span>;
 
   function show() {
     const r = ref.current?.getBoundingClientRect();
@@ -240,13 +434,13 @@ function NoteCell({ note }: { note: string | null }) {
       ref={ref}
       onMouseEnter={show}
       onMouseLeave={() => setCoords(null)}
-      className="block max-w-[16rem] cursor-default truncate text-slate-500"
+      className="block max-w-[16rem] cursor-default truncate text-slate-500 dark:text-slate-400"
     >
       {note}
       {coords && (
         <span
           style={{ position: "fixed", top: coords.top, left: coords.left }}
-          className="z-50 block max-w-sm whitespace-normal rounded-lg bg-slate-900 px-3 py-2 text-xs font-normal text-white shadow-lg"
+          className="z-50 block max-w-sm whitespace-normal rounded-lg bg-slate-900 px-3 py-2 text-xs font-normal text-white dark:bg-slate-800 dark:text-slate-100 shadow-lg"
         >
           {note}
         </span>
@@ -268,9 +462,10 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const canPaid = inv.status === "unpaid" || inv.status === "partial";
-  const canUnpaid = inv.status === "paid" || inv.status === "partial";
-  const canCancel = inv.status !== "cancelled";
+  const cancelled = inv.status === "cancelled";
+  const canPaid = inv.status === "unpaid";
+  const canUnpaid = inv.status === "paid";
+  const canCancel = !cancelled;
 
   function openMenu() {
     const r = btnRef.current?.getBoundingClientRect();
@@ -327,7 +522,7 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
       <button
         ref={btnRef}
         onClick={() => (open ? close() : openMenu())}
-        className="rounded-lg border border-slate-200 px-2.5 py-1 text-slate-500 hover:bg-slate-100"
+        className="rounded-lg border border-slate-200 dark:border-slate-800 px-2.5 py-1 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
         aria-label="Row actions"
       >
         ⋯
@@ -337,7 +532,7 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
         <div
           ref={menuRef}
           style={{ position: "fixed", top: coords.top, right: coords.right }}
-          className="z-50 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-left text-sm shadow-lg"
+          className="z-50 w-48 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-1 text-left text-sm shadow-lg"
         >
           {confirm === null ? (
             <>
@@ -359,13 +554,21 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
               )}
               <Link
                 href={`/invoices/${inv.id}/edit`}
-                className="block px-3 py-2 text-slate-700 hover:bg-slate-50"
+                className="block px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 Edit invoice
               </Link>
               {canCancel && (
                 <MenuItem warn onClick={() => setConfirm("cancel")}>
                   Cancel invoice
+                </MenuItem>
+              )}
+              {cancelled && (
+                <MenuItem
+                  disabled={pending}
+                  onClick={() => run(() => reactivateInvoiceByIdAction(inv.id))}
+                >
+                  Reactivate invoice
                 </MenuItem>
               )}
               <MenuItem danger onClick={() => setConfirm("delete")}>
@@ -390,7 +593,7 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
                 </button>
                 <button
                   onClick={() => setConfirm(null)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   No
                 </button>
@@ -411,7 +614,7 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
                 </button>
                 <button
                   onClick={() => setConfirm(null)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   No
                 </button>
@@ -438,10 +641,10 @@ function MenuItem({
   warn?: boolean;
 }) {
   const tone = danger
-    ? "text-red-600 hover:bg-red-50"
+    ? "text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/50"
     : warn
-      ? "text-amber-700 hover:bg-amber-50"
-      : "text-slate-700 hover:bg-slate-50";
+      ? "text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/50"
+      : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800";
   return (
     <button
       onClick={onClick}
@@ -465,12 +668,14 @@ function Select({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-slate-600">
-      <span className="text-xs font-medium text-slate-500">{label}</span>
+    <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+        className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
       >
         {children}
       </select>

@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ClientWithIssuer, Issuer } from "@/lib/types";
-import { formatAUD, formatDate } from "@/lib/format";
+import { formatAUD, formatDate, todayInSydney } from "@/lib/format";
 
 export type InvoiceFormPayload = {
   client_id: string;
@@ -35,7 +35,7 @@ export type InvoiceFormInitial = {
   lines: Line[];
 };
 
-const today = new Date().toISOString().slice(0, 10);
+const today = todayInSydney();
 
 function emptyLine(serviceDate = ""): Line {
   return {
@@ -56,14 +56,12 @@ export function InvoiceForm({
   clients,
   issuers,
   action,
-  nextNumber = null,
   initial = null,
   submitLabel = "Create invoice",
 }: {
   clients: ClientWithIssuer[];
   issuers: Issuer[];
   action: (payload: InvoiceFormPayload) => Promise<InvoiceFormResult>;
-  nextNumber?: number | null;
   initial?: InvoiceFormInitial | null;
   submitLabel?: string;
 }) {
@@ -74,7 +72,9 @@ export function InvoiceForm({
 
   const [clientId, setClientId] = useState(initial?.client_id ?? "");
   const [issuerId, setIssuerId] = useState(initial?.issuer_id ?? "");
-  const [invoiceDate, setInvoiceDate] = useState(initial?.invoice_date ?? today);
+  const [invoiceDate, setInvoiceDate] = useState(
+    initial?.invoice_date ?? today,
+  );
   const [notes, setNotes] = useState(initial?.internal_notes ?? "");
   const [lines, setLines] = useState<Line[]>(
     initial?.lines?.length ? initial.lines : [emptyLine()],
@@ -139,9 +139,9 @@ export function InvoiceForm({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:grid-cols-2">
+      <div className="grid gap-4 rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             Client *
           </span>
           <select
@@ -159,7 +159,7 @@ export function InvoiceForm({
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             ABN (issuer) *
           </span>
           <select
@@ -177,7 +177,7 @@ export function InvoiceForm({
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             Invoice date
           </span>
           <input
@@ -189,32 +189,34 @@ export function InvoiceForm({
         </label>
 
         <div className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             Terms / Due date
           </span>
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <p className="rounded-lg bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm text-slate-600 dark:text-slate-400">
             NET7 · due {formatDate(addDays(invoiceDate, 7))}
           </p>
         </div>
       </div>
 
       {/* Line items */}
-      <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Services</h2>
+          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Services
+          </h2>
           <button
             type="button"
             onClick={() =>
               setLines((p) => [...p, emptyLine(p[0]?.service_date ?? "")])
             }
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             + Add line
           </button>
         </div>
 
         <div className="space-y-2">
-          <div className="hidden grid-cols-12 gap-2 px-1 text-xs font-medium text-slate-400 sm:grid">
+          <div className="hidden grid-cols-12 gap-2 px-1 text-xs font-medium text-slate-400 dark:text-slate-500 sm:grid">
             <span className="col-span-5">Description</span>
             <span className="col-span-3">Service date</span>
             <span className="col-span-1 text-right">Qty</span>
@@ -261,7 +263,7 @@ export function InvoiceForm({
                   )
                 }
                 disabled={lines.length === 1}
-                className="col-span-1 rounded-md px-2 py-2 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                className="col-span-1 rounded-md px-2 py-2 text-slate-400 dark:text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
                 title="Remove line"
               >
                 ✕
@@ -270,10 +272,12 @@ export function InvoiceForm({
           ))}
         </div>
 
-        <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
+        <div className="mt-4 flex justify-end border-t border-slate-100 dark:border-slate-800 pt-4">
           <div className="text-right">
-            <span className="text-xs font-medium text-slate-500">Total</span>
-            <p className="text-xl font-bold text-slate-900">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Total
+            </span>
+            <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
               {formatAUD(total)}
             </p>
           </div>
@@ -281,9 +285,9 @@ export function InvoiceForm({
       </div>
 
       {/* Internal notes */}
-      <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600">
+          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
             Internal notes (not printed on the invoice)
           </span>
           <textarea
@@ -297,22 +301,16 @@ export function InvoiceForm({
       </div>
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200">
+        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900">
           {error}
         </p>
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-3">
-        {!isEdit && nextNumber != null && (
-          <p className="mr-auto text-xs text-slate-400">
-            This invoice will be #{nextNumber} — the final number is assigned
-            when you save.
-          </p>
-        )}
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
         >
           Cancel
         </button>
@@ -320,7 +318,7 @@ export function InvoiceForm({
           type="button"
           onClick={submit}
           disabled={pending}
-          className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+          className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300 disabled:opacity-60"
         >
           {pending ? (isEdit ? "Saving…" : "Creating…") : submitLabel}
         </button>

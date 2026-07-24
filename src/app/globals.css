@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
+/* Class-based dark mode rather than prefers-color-scheme, so the theme toggle
+   is the single source of truth. The `dark` class lives on <html> and is set
+   before paint by the inline script in the root layout. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
+}
+
+.dark {
+  --background: #020617;
+  --foreground: #f1f5f9;
 }
 
 @theme inline {
@@ -10,13 +20,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -35,8 +38,16 @@ body {
     font-size: 0.875rem;
     color: var(--color-slate-900);
   }
+  .dark .input {
+    border-color: var(--color-slate-700);
+    background: var(--color-slate-900);
+    color: var(--color-slate-100);
+  }
   .input:focus {
     outline: 2px solid var(--color-slate-400);
     outline-offset: 1px;
+  }
+  .dark .input:focus {
+    outline-color: var(--color-slate-600);
   }
 }

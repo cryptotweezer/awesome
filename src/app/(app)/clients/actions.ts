@@ -37,7 +37,8 @@ export async function saveClientAction(
     postcode: str(formData, "postcode"),
     email: str(formData, "email"),
     default_issuer_id: str(formData, "default_issuer_id"),
-    default_description: str(formData, "default_description") ?? "Cleaning Service",
+    default_description:
+      str(formData, "default_description") ?? "Cleaning Service",
     default_rate: rate,
   };
 
@@ -48,7 +49,10 @@ export async function saveClientAction(
       await createClient(input);
     }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Save failed." };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Save failed.",
+    };
   }
 
   revalidatePath("/clients");

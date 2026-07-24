@@ -37,16 +37,16 @@ export default async function EditInvoicePage({
       <div className="flex items-center justify-between">
         <Link
           href={`/invoices/${id}`}
-          className="text-sm text-slate-500 hover:underline"
+          className="text-sm text-slate-500 dark:text-slate-400 hover:underline"
         >
           ← Back to invoice
         </Link>
       </div>
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           Edit invoice #{inv.invoice_number}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Fix any detail — the invoice number stays the same. Totals and due
           date recalculate on save.
         </p>

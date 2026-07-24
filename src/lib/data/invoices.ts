@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { todayInSydney } from "@/lib/format";
 import type { Invoice, InvoiceItem, InvoiceStatus } from "@/lib/types";
 
 export type InvoiceListRow = Invoice & {
@@ -82,7 +83,7 @@ export type OutstandingSummary = {
 };
 
 /**
- * Aggregate every unpaid/partial invoice into a per-client outstanding summary,
+ * Aggregate every unpaid invoice into a per-client outstanding summary,
  * splitting overdue (past the 7-day term) from those still within term. Overdue
  * is DERIVED here (due_date < today), never stored.
  */
@@ -91,10 +92,10 @@ export async function getOutstandingSummary(): Promise<OutstandingSummary> {
   const { data, error } = await supabase
     .from("invoices")
     .select("id, invoice_number, bill_to_name, balance_due, due_date, status")
-    .in("status", ["unpaid", "partial"]);
+    .eq("status", "unpaid");
   if (error) throw new Error(`Failed to load outstanding: ${error.message}`);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInSydney();
   const rows = data ?? [];
 
   let totalAmount = 0;
@@ -110,16 +111,14 @@ export async function getOutstandingSummary(): Promise<OutstandingSummary> {
       overdueAmount += amount;
       overdueCount += 1;
     }
-    const entry =
-      byClient.get(r.bill_to_name) ??
-      {
-        client_name: r.bill_to_name,
-        amount: 0,
-        count: 0,
-        overdueAmount: 0,
-        overdueCount: 0,
-        invoices: [] as OutstandingInvoice[],
-      };
+    const entry = byClient.get(r.bill_to_name) ?? {
+      client_name: r.bill_to_name,
+      amount: 0,
+      count: 0,
+      overdueAmount: 0,
+      overdueCount: 0,
+      invoices: [] as OutstandingInvoice[],
+    };
     entry.amount += amount;
     entry.count += 1;
     if (overdue) {
@@ -152,6 +151,90 @@ export async function getOutstandingSummary(): Promise<OutstandingSummary> {
     byClient: Array.from(byClient.values()).sort(
       (a, b) => b.overdueAmount - a.overdueAmount || b.amount - a.amount,
     ),
+  };
+}
+
+/**
+ * Start of the current Australian financial year (1 Jul – 30 Jun) as YYYY-MM-DD.
+ * Rolls over on its own — no config to remember every July.
+ */
+export function financialYearStart(today: string = todayInSydney()): string {
+  const [y, m] = today.split("-").map(Number);
+  // Jan–Jun still belong to the FY that started the previous July.
+  const startYear = m >= 7 ? y : y - 1;
+  return `${startYear}-07-01`;
+}
+
+/** "FY 2026-27" for the FY that began on the given start date. */
+export function financialYearLabel(start: string): string {
+  const y = Number(start.slice(0, 4));
+  return `FY ${y}-${String((y + 1) % 100).padStart(2, "0")}`;
+}
+
+/** Last day of the FY that began on the given start date. */
+export function financialYearEnd(start: string): string {
+  return `${Number(start.slice(0, 4)) + 1}-06-30`;
+}
+
+export type PeriodTotal = { fy: number; all: number };
+
+export type BillingTotals = {
+  fyStart: string;
+  fyEnd: string;
+  fyLabel: string;
+  /** Money actually received (status = paid). */
+  paid: PeriodTotal;
+  /** Everything issued under each ABN, cancelled excluded. */
+  byIssuer: { short_name: string; total: PeriodTotal }[];
+};
+
+/**
+ * Headline totals for the Overview: what has been collected, and how much each
+ * ABN has billed. Both split into the current financial year and all time.
+ * Bucketed by `invoice_date` — there is no separate payment date on record.
+ */
+export async function getBillingTotals(): Promise<BillingTotals> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("invoice_date, total, status, issuer:issuers(short_name)");
+  if (error) throw new Error(`Failed to load totals: ${error.message}`);
+
+  const fyStart = financialYearStart();
+  const paid: PeriodTotal = { fy: 0, all: 0 };
+  const byIssuer = new Map<string, PeriodTotal>();
+
+  for (const r of (data ?? []) as unknown as {
+    invoice_date: string;
+    total: number;
+    status: InvoiceStatus;
+    issuer: { short_name: string } | null;
+  }[]) {
+    if (r.status === "cancelled") continue;
+    const amount = Number(r.total);
+    const inFy = r.invoice_date >= fyStart;
+
+    if (r.status === "paid") {
+      paid.all += amount;
+      if (inFy) paid.fy += amount;
+    }
+
+    const name = r.issuer?.short_name ?? "—";
+    const entry = byIssuer.get(name) ?? { fy: 0, all: 0 };
+    entry.all += amount;
+    if (inFy) entry.fy += amount;
+    byIssuer.set(name, entry);
+  }
+
+  return {
+    fyStart,
+    fyEnd: financialYearEnd(fyStart),
+    fyLabel: financialYearLabel(fyStart),
+    paid,
+    byIssuer: Array.from(byIssuer, ([short_name, total]) => ({
+      short_name,
+      total,
+    })).sort((a, b) => a.short_name.localeCompare(b.short_name)),
   };
 }
 
@@ -220,7 +303,9 @@ export async function createInvoice(input: NewInvoiceInput): Promise<Invoice> {
     sort_order: idx,
   }));
 
-  const { error: itemsErr } = await supabase.from("invoice_items").insert(items);
+  const { error: itemsErr } = await supabase
+    .from("invoice_items")
+    .insert(items);
   if (itemsErr) {
     // roll back the empty invoice so we don't leave an orphan / burnt number gap
     await supabase.from("invoices").delete().eq("id", invoice.id);
@@ -339,6 +424,16 @@ export async function setInvoicePaidAmount(
     .update({ paid_amount: paidAmount })
     .eq("id", id);
   if (error) throw new Error(`Failed to update payment: ${error.message}`);
+}
+
+/**
+ * Undo a cancellation (cancelled by mistake). Writing any non-cancelled status
+ * makes the DB trigger re-derive the real one from paid_amount, so the invoice
+ * lands back on unpaid or paid on its own. The number is untouched —
+ * cancelling never released it.
+ */
+export async function reactivateInvoice(id: string): Promise<void> {
+  await setInvoiceStatus(id, "unpaid");
 }
 
 export async function setInvoiceStatus(
