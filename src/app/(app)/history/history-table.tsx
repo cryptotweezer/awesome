@@ -230,6 +230,7 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
         title="Paid & cancelled"
         rows={closed}
         scrollable
+        collapsible
         filtered={filtered && inScope("closed")}
         empty={
           filtered && inScope("closed")
@@ -274,6 +275,7 @@ function InvoiceTable({
   empty,
   scrollable = false,
   filtered = false,
+  collapsible = false,
 }: {
   title: string;
   rows: InvoiceListRow[];
@@ -281,28 +283,67 @@ function InvoiceTable({
   scrollable?: boolean;
   /** Marks the table the filter bar is currently acting on. */
   filtered?: boolean;
+  /** Render the section closed, with a clickable header to reveal it. */
+  collapsible?: boolean;
 }) {
   const total = rows.reduce((sum, i) => sum + Number(i.total), 0);
+  const [open, setOpen] = useState(false);
+
+  // A filter acting on this table forces it open, so a search can never hide its
+  // own results behind a collapsed header. Otherwise the user's toggle wins.
+  const bodyVisible = !collapsible || open || filtered;
+
+  const summary = (
+    <>
+      <div className="flex items-center gap-2">
+        {collapsible && (
+          <svg
+            className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${
+              bodyVisible ? "rotate-90" : ""
+            }`}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M7 5l6 5-6 5z" />
+          </svg>
+        )}
+        <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          {title}
+        </h2>
+        {filtered && (
+          <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+            filtered
+          </span>
+        )}
+      </div>
+      <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+        {rows.length} {rows.length === 1 ? "invoice" : "invoices"} ·{" "}
+        {formatAUD(total)}
+      </span>
+    </>
+  );
 
   return (
     <div className="rounded-2xl bg-white dark:bg-slate-900 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
-      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-            {title}
-          </h2>
-          {filtered && (
-            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-              filtered
-            </span>
-          )}
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={bodyVisible}
+          className={`flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800 ${
+            bodyVisible ? "border-b border-slate-100 dark:border-slate-800" : ""
+          }`}
+        >
+          {summary}
+        </button>
+      ) : (
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3">
+          {summary}
         </div>
-        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
-          {rows.length} {rows.length === 1 ? "invoice" : "invoices"} ·{" "}
-          {formatAUD(total)}
-        </span>
-      </div>
+      )}
 
+      {bodyVisible && (
       <div
         className="overflow-x-auto"
         style={
@@ -409,6 +450,7 @@ function InvoiceTable({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

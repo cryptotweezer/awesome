@@ -38,13 +38,15 @@ export default async function BackupPage() {
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <a
-            href="/backup/download"
+            href="/backup/excel"
             className="group flex items-center justify-between gap-3 rounded-xl bg-slate-900 px-5 py-4 text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
           >
             <span>
-              <span className="block text-sm font-semibold">Download backup</span>
+              <span className="block text-sm font-semibold">
+                Download as Excel
+              </span>
               <span className="block text-xs opacity-70">
-                Full file, restorable (JSON)
+                Spreadsheet, easy to read
               </span>
             </span>
             <span aria-hidden="true" className="text-lg">
@@ -53,15 +55,13 @@ export default async function BackupPage() {
           </a>
 
           <a
-            href="/backup/excel"
+            href="/backup/download"
             className="group flex items-center justify-between gap-3 rounded-xl px-5 py-4 text-slate-900 ring-1 ring-slate-300 transition hover:bg-slate-50 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-slate-800"
           >
             <span>
-              <span className="block text-sm font-semibold">
-                Download as Excel
-              </span>
+              <span className="block text-sm font-semibold">Download backup</span>
               <span className="block text-xs text-slate-400 dark:text-slate-500">
-                Spreadsheet, easy to read
+                Full file, restorable (JSON)
               </span>
             </span>
             <span aria-hidden="true" className="text-lg">
