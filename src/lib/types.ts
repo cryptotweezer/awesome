@@ -44,6 +44,16 @@ export interface CompanyProfile {
   bank_account_no: string;
   bank_account_name: string;
   payment_note: string;
+  email_subject_template: string;
+  email_body_template: string;
+}
+
+export interface AgentKey {
+  id: string;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
 }
 
 export interface Invoice {

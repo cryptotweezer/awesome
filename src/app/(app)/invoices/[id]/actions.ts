@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import {
-  getInvoice,
-  setInvoicePaidAmount,
-  setInvoiceStatus,
+  markPaid,
+  markUnpaid,
+  cancelInvoice,
   reactivateInvoice,
   updateInvoice,
   deleteInvoice,
@@ -25,9 +25,7 @@ export async function markPaidAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    const inv = await getInvoice(id);
-    if (!inv) return { ok: false, error: "Invoice not found." };
-    await setInvoicePaidAmount(id, Number(inv.total));
+    await markPaid(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -38,9 +36,7 @@ export async function markPaidAction(
 /** Same as markPaidAction but called directly by id (history quick-action). */
 export async function markPaidByIdAction(id: string): Promise<ActionState> {
   try {
-    const inv = await getInvoice(id);
-    if (!inv) return { ok: false, error: "Invoice not found." };
-    await setInvoicePaidAmount(id, Number(inv.total));
+    await markPaid(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -54,7 +50,7 @@ export async function markUnpaidAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await setInvoicePaidAmount(id, 0);
+    await markUnpaid(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -65,7 +61,7 @@ export async function markUnpaidAction(
 /** Same as markUnpaidAction but called directly by id (history quick-action). */
 export async function markUnpaidByIdAction(id: string): Promise<ActionState> {
   try {
-    await setInvoicePaidAmount(id, 0);
+    await markUnpaid(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -79,7 +75,7 @@ export async function cancelInvoiceAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await setInvoiceStatus(id, "cancelled");
+    await cancelInvoice(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -92,7 +88,7 @@ export async function cancelInvoiceByIdAction(
   id: string,
 ): Promise<ActionState> {
   try {
-    await setInvoiceStatus(id, "cancelled");
+    await cancelInvoice(id);
     await refresh(id);
     return { ok: true };
   } catch (e) {

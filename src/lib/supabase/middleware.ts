@@ -21,6 +21,17 @@ function isHermesPdfRequest(request: NextRequest): boolean {
 }
 
 /**
+ * The gateway endpoints authenticate themselves with a per-agent key (see
+ * src/lib/gateway/auth.ts), so they must skip the browser-session enforcement
+ * and reach their route handler, which returns a proper 401 instead of a
+ * redirect to /login.
+ */
+function isGatewayRequest(request: NextRequest): boolean {
+  const path = request.nextUrl.pathname;
+  return path.startsWith("/api/agent") || path.startsWith("/api/mcp");
+}
+
+/**
  * Runs on every request: refreshes the Supabase session cookie and enforces
  * access. Public paths are /login and /auth/*; everything else requires an
  * authenticated AND whitelisted user.
@@ -29,7 +40,7 @@ export async function updateSession(request: NextRequest) {
   // Hermes/Ema has no browser session, so it authenticates the PDF endpoints
   // with a shared key instead. Inert until HERMES_API_KEY is set in the env,
   // and deliberately scoped to `/pdf` only — never to the rest of the app.
-  if (isHermesPdfRequest(request)) {
+  if (isHermesPdfRequest(request) || isGatewayRequest(request)) {
     return NextResponse.next({ request });
   }
 

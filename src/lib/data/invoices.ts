@@ -39,6 +39,30 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
 }
 
 /**
+ * Resolve an invoice by EITHER its UUID or its invoice_number, so an agent can
+ * ask for "1954" without first resolving a UUID. An all-digit ref is treated as
+ * an invoice number; anything else falls back to a UUID lookup.
+ */
+export async function getInvoiceByRef(
+  ref: string,
+): Promise<InvoiceDetail | null> {
+  const trimmed = ref.trim();
+  if (!/^\d+$/.test(trimmed)) return getInvoice(trimmed);
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*, issuer:issuers(short_name), invoice_items(*)")
+    .eq("invoice_number", Number(trimmed))
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load invoice: ${error.message}`);
+  if (!data) return null;
+  const detail = data as unknown as InvoiceDetail;
+  detail.invoice_items.sort((a, b) => a.sort_order - b.sort_order);
+  return detail;
+}
+
+/**
  * The number the next inserted invoice WOULD receive, without consuming the
  * sequence. This is an estimate for display only — the definitive number is
  * assigned atomically by the DB at insert time and can never collide, even if
@@ -256,69 +280,22 @@ export type NewInvoiceInput = {
 
 export async function createInvoice(input: NewInvoiceInput): Promise<Invoice> {
   const supabase = createAdminClient();
-
-  // Snapshot the client and issuer at creation time.
-  const { data: client, error: cErr } = await supabase
-    .from("clients")
-    .select("*")
-    .eq("id", input.client_id)
-    .single();
-  if (cErr || !client) throw new Error("Client not found.");
-
-  const { data: issuer, error: iErr } = await supabase
-    .from("issuers")
-    .select("*")
-    .eq("id", input.issuer_id)
-    .single();
-  if (iErr || !issuer) throw new Error("Issuer not found.");
-
-  const { data: invoice, error: invErr } = await supabase
-    .from("invoices")
-    .insert({
-      issuer_id: issuer.id,
-      issuer_name: issuer.full_name,
-      issuer_abn: issuer.abn,
-      client_id: client.id,
-      bill_to_name: client.name,
-      bill_to_address_line: client.address_line,
-      bill_to_suburb: client.suburb,
-      bill_to_state: client.state,
-      bill_to_postcode: client.postcode,
-      invoice_date: input.invoice_date,
-      internal_notes: input.internal_notes,
-      created_by: input.created_by,
-    })
-    .select("*")
-    .single();
-  if (invErr || !invoice) {
-    throw new Error(`Failed to create invoice: ${invErr?.message}`);
+  // Atomic in the DB (awesome.create_invoice): snapshots the client + issuer,
+  // inserts the header and the items in ONE transaction and rejects an empty
+  // item list. This is the same function every agent calls, so the rules live
+  // in Postgres, not here.
+  const { data, error } = await supabase.rpc("create_invoice", {
+    p_client_id: input.client_id,
+    p_issuer_id: input.issuer_id,
+    p_invoice_date: input.invoice_date,
+    p_created_by: input.created_by,
+    p_items: input.items,
+    p_internal_notes: input.internal_notes,
+  });
+  if (error || !data) {
+    throw new Error(`Failed to create invoice: ${error?.message}`);
   }
-
-  const items = input.items.map((it, idx) => ({
-    invoice_id: invoice.id,
-    description: it.description,
-    service_date: it.service_date,
-    quantity: it.quantity,
-    rate: it.rate,
-    sort_order: idx,
-  }));
-
-  const { error: itemsErr } = await supabase
-    .from("invoice_items")
-    .insert(items);
-  if (itemsErr) {
-    // roll back the empty invoice so we don't leave an orphan / burnt number gap
-    await supabase.from("invoices").delete().eq("id", invoice.id);
-    throw new Error(`Failed to add invoice items: ${itemsErr.message}`);
-  }
-
-  // re-read to get trigger-computed totals
-  const { data: fresh } = await supabase
-    .from("invoices")
-    .select("*")
-    .eq("id", invoice.id)
-    .single();
-  return (fresh ?? invoice) as Invoice;
+  return data as Invoice;
 }
 
 export type UpdateInvoiceInput = {
@@ -340,64 +317,21 @@ export async function updateInvoice(
   input: UpdateInvoiceInput,
 ): Promise<Invoice> {
   const supabase = createAdminClient();
-
-  const { data: client, error: cErr } = await supabase
-    .from("clients")
-    .select("*")
-    .eq("id", input.client_id)
-    .single();
-  if (cErr || !client) throw new Error("Client not found.");
-
-  const { data: issuer, error: iErr } = await supabase
-    .from("issuers")
-    .select("*")
-    .eq("id", input.issuer_id)
-    .single();
-  if (iErr || !issuer) throw new Error("Issuer not found.");
-
-  const { error: upErr } = await supabase
-    .from("invoices")
-    .update({
-      issuer_id: issuer.id,
-      issuer_name: issuer.full_name,
-      issuer_abn: issuer.abn,
-      client_id: client.id,
-      bill_to_name: client.name,
-      bill_to_address_line: client.address_line,
-      bill_to_suburb: client.suburb,
-      bill_to_state: client.state,
-      bill_to_postcode: client.postcode,
-      invoice_date: input.invoice_date,
-      internal_notes: input.internal_notes,
-    })
-    .eq("id", id);
-  if (upErr) throw new Error(`Failed to update invoice: ${upErr.message}`);
-
-  // Replace all line items (simplest correct approach; triggers recompute totals).
-  const { error: delErr } = await supabase
-    .from("invoice_items")
-    .delete()
-    .eq("invoice_id", id);
-  if (delErr) throw new Error(`Failed to update items: ${delErr.message}`);
-
-  const items = input.items.map((it, idx) => ({
-    invoice_id: id,
-    description: it.description,
-    service_date: it.service_date,
-    quantity: it.quantity,
-    rate: it.rate,
-    sort_order: idx,
-  }));
-  const { error: insErr } = await supabase.from("invoice_items").insert(items);
-  if (insErr) throw new Error(`Failed to update items: ${insErr.message}`);
-
-  const { data: fresh } = await supabase
-    .from("invoices")
-    .select("*")
-    .eq("id", id)
-    .single();
-  if (!fresh) throw new Error("Invoice vanished after update.");
-  return fresh as Invoice;
+  // Atomic in the DB (awesome.update_invoice): re-snapshots the client + issuer
+  // and fully replaces the line items in one transaction. invoice_number and
+  // created_by are never touched.
+  const { data, error } = await supabase.rpc("update_invoice", {
+    p_id: id,
+    p_client_id: input.client_id,
+    p_issuer_id: input.issuer_id,
+    p_invoice_date: input.invoice_date,
+    p_items: input.items,
+    p_internal_notes: input.internal_notes,
+  });
+  if (error || !data) {
+    throw new Error(`Failed to update invoice: ${error?.message}`);
+  }
+  return data as Invoice;
 }
 
 /**
@@ -413,37 +347,38 @@ export async function deleteInvoice(id: string): Promise<void> {
   if (error) throw new Error(`Failed to delete invoice: ${error.message}`);
 }
 
-/** Set the paid amount (and let the trigger derive status + balance_due). */
-export async function setInvoicePaidAmount(
-  id: string,
-  paidAmount: number,
-): Promise<void> {
+/**
+ * Mark an invoice paid in full. No partial payments: the DB sets
+ * paid_amount = total and the trigger derives status = paid, balance_due = 0.
+ * Rejected on a cancelled invoice (reactivate it first).
+ */
+export async function markPaid(id: string): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase
-    .from("invoices")
-    .update({ paid_amount: paidAmount })
-    .eq("id", id);
-  if (error) throw new Error(`Failed to update payment: ${error.message}`);
+  const { error } = await supabase.rpc("mark_paid", { p_id: id });
+  if (error) throw new Error(`Failed to mark paid: ${error.message}`);
+}
+
+/** Undo a payment: paid_amount back to 0, status re-derived to unpaid. */
+export async function markUnpaid(id: string): Promise<void> {
+  const supabase = createAdminClient();
+  const { error } = await supabase.rpc("mark_unpaid", { p_id: id });
+  if (error) throw new Error(`Failed to mark unpaid: ${error.message}`);
+}
+
+/** Cancel an invoice: status = cancelled, the number is kept (never released). */
+export async function cancelInvoice(id: string): Promise<void> {
+  const supabase = createAdminClient();
+  const { error } = await supabase.rpc("cancel_invoice", { p_id: id });
+  if (error) throw new Error(`Failed to cancel invoice: ${error.message}`);
 }
 
 /**
- * Undo a cancellation (cancelled by mistake). Writing any non-cancelled status
- * makes the DB trigger re-derive the real one from paid_amount, so the invoice
- * lands back on unpaid or paid on its own. The number is untouched —
- * cancelling never released it.
+ * Undo a cancellation (cancelled by mistake). The DB writes a non-cancelled
+ * status so the trigger re-derives the real one from paid_amount, landing back
+ * on unpaid or paid on its own.
  */
 export async function reactivateInvoice(id: string): Promise<void> {
-  await setInvoiceStatus(id, "unpaid");
-}
-
-export async function setInvoiceStatus(
-  id: string,
-  status: InvoiceStatus,
-): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase
-    .from("invoices")
-    .update({ status })
-    .eq("id", id);
-  if (error) throw new Error(`Failed to update status: ${error.message}`);
+  const { error } = await supabase.rpc("reactivate_invoice", { p_id: id });
+  if (error) throw new Error(`Failed to reactivate invoice: ${error.message}`);
 }

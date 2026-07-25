@@ -1,5 +1,5 @@
 import { renderToBuffer } from "@react-pdf/renderer";
-import { getInvoice } from "@/lib/data/invoices";
+import { getInvoiceByRef } from "@/lib/data/invoices";
 import { getCompanyProfile } from "@/lib/data/company";
 import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
 
@@ -9,8 +9,11 @@ import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
  * "PDF" button and (later) Hermes/Ema, which fetches the bytes and forwards
  * them over Telegram/email.
  *
- *   GET /invoices/:id/pdf            -> downloads the file
- *   GET /invoices/:id/pdf?inline=1   -> renders in the browser's PDF viewer
+ * The path segment accepts either the invoice UUID or its invoice_number, so
+ * "/invoices/1954/pdf" works as well as the UUID form.
+ *
+ *   GET /invoices/:ref/pdf            -> downloads the file
+ *   GET /invoices/:ref/pdf?inline=1   -> renders in the browser's PDF viewer
  *
  * Access is enforced by the proxy (session cookie, or the Hermes API key).
  */
@@ -21,7 +24,7 @@ export async function GET(
   const { id } = await ctx.params;
 
   const [invoice, company] = await Promise.all([
-    getInvoice(id),
+    getInvoiceByRef(id),
     getCompanyProfile(),
   ]);
   if (!invoice) {
