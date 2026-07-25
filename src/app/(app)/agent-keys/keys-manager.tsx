@@ -29,20 +29,14 @@ export function KeysManager({ keys }: { keys: AgentKey[] }) {
         <MintedBanner minted={minted} onDismiss={() => setMinted(null)} />
       )}
 
-      <div className="rounded-2xl bg-slate-50 dark:bg-slate-900/50 p-4 text-sm text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-slate-800">
-        Give each agent its own key. It sends it as{" "}
-        <code className="rounded bg-slate-200 dark:bg-slate-800 px-1 py-0.5 text-xs">
-          Authorization: Bearer &lt;key&gt;
-        </code>{" "}
-        to{" "}
-        <code className="rounded bg-slate-200 dark:bg-slate-800 px-1 py-0.5 text-xs">
-          /api/agent/&lt;tool&gt;
-        </code>{" "}
-        (REST) or{" "}
-        <code className="rounded bg-slate-200 dark:bg-slate-800 px-1 py-0.5 text-xs">
-          /api/mcp
-        </code>{" "}
-        (MCP). Revoke one anytime without touching the others.
+      <div className="rounded-2xl bg-slate-50 dark:bg-slate-900/50 p-4 text-sm ring-1 ring-slate-200 dark:ring-slate-800">
+        <p className="font-semibold text-slate-900 dark:text-slate-100">
+          One key per agent
+        </p>
+        <p className="mt-1 text-slate-600 dark:text-slate-400">
+          Separate keys keep agents isolated: if one leaks, you revoke just that
+          key and every other agent keeps working.
+        </p>
       </div>
 
       <div className="flex justify-end">

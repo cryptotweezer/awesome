@@ -171,6 +171,23 @@ export default async function OverviewPage() {
           Back up
         </Link>
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200 dark:bg-slate-900/50 dark:ring-slate-800">
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-slate-100">
+            Agent keys
+          </p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            One key per AI agent. Revoke any of them anytime.
+          </p>
+        </div>
+        <Link
+          href="/agent-keys"
+          className="shrink-0 rounded-lg px-4 py-2.5 text-sm font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-white dark:text-slate-200 dark:ring-slate-700 dark:hover:bg-slate-800"
+        >
+          Manage keys
+        </Link>
+      </div>
     </div>
   );
 }
