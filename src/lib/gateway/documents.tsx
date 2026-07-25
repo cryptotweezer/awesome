@@ -237,3 +237,40 @@ export async function prepareClientEmail(input: {
     warning: client.email ? undefined : "Client has no email on file",
   };
 }
+
+export type ClientStatementEmail = {
+  to: string | null;
+  client_name: string;
+  subject: string;
+  body: string;
+  attachments: Pdf[];
+  warning?: string;
+};
+
+/**
+ * Everything an agent needs to email a client their account statement. The
+ * client is resolved once; the recipient is THAT client's email and the PDF is
+ * THAT client's statement, so a statement can never reach the wrong client.
+ */
+export async function prepareClientStatementEmail(input: {
+  client_id?: string | null;
+  client?: string | null;
+}): Promise<ClientStatementEmail> {
+  const client = await resolveClient(input);
+  const statement = await renderClientStatementPdf(client.id);
+  const company = await getCompanyProfile();
+
+  const fill = (t: string) =>
+    t
+      .replaceAll("{client_name}", client.name)
+      .replaceAll("{business_name}", company.business_name);
+
+  return {
+    to: client.email ?? null,
+    client_name: client.name,
+    subject: fill(company.statement_subject_template),
+    body: fill(company.statement_body_template),
+    attachments: [statement],
+    warning: client.email ? undefined : "Client has no email on file",
+  };
+}

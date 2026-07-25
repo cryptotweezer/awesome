@@ -8,33 +8,40 @@ type Line =
   | { from: "agent"; text: string; file?: string };
 
 const CONVERSATION: Line[] = [
-  { from: "you", text: "Who owes me money?" },
+  { from: "you", text: "Morning! Who still owes me money?" },
   {
     from: "agent",
-    text: "4 clients, $2,340 outstanding. Two of them are past their payment term.",
+    text: "Morning! You have 4 clients with open invoices, $2,340 in total, and 2 of them are past their due date. Want me to chase those?",
   },
-  { from: "you", text: "Invoice Sarah for the job on Tuesday" },
+  { from: "you", text: "Yes please, send Mark a reminder for what he owes" },
   {
     from: "agent",
-    text: "Done. Invoice #1954 for $180.00, due 31 July.",
+    text: "Sent Mark a friendly reminder, with his statement attached, 3 unpaid invoices, $620.00 in total.",
+    file: "Statement-Mark.pdf",
+  },
+  {
+    from: "you",
+    text: "Great. Can you invoice Sarah for Tuesday's job and email it to her?",
+  },
+  {
+    from: "agent",
+    text: "All done, Invoice #1954 for $180.00, due 31 July. I emailed it straight to Sarah.",
     file: "Invoice-1954-Sarah.pdf",
   },
-  { from: "you", text: "How much did I bill in June?" },
-  { from: "agent", text: "$8,410 across 22 invoices." },
-  { from: "you", text: "Send Mark a reminder for what he still owes" },
+  { from: "you", text: "How did we do this month?" },
   {
     from: "agent",
-    text: "Statement ready. 3 unpaid invoices, $620.00 in total.",
-    file: "Statement-Mark.pdf",
+    text: "Nice month, $8,410 billed across 22 invoices, and $6,900 already paid.",
   },
 ];
 
 const MORE = [
-  "What are the last invoices for Acme?",
-  "Prepare my tax statement for last financial year",
-  "Mark invoice 1948 as paid",
-  "Who has gone past their due date?",
-  "What have I billed this year?",
+  "Could you pull up the last few invoices for Acme?",
+  "Can you get my tax statement ready for last financial year?",
+  "Mark invoice 1948 as paid, please",
+  "Who has fallen behind on payments?",
+  "How much have I billed this year, and all time?",
+  "Back up everything for me, just in case",
 ];
 
 export function ChatDemo() {

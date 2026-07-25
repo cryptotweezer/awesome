@@ -100,3 +100,91 @@ export async function fySummary(fyStart?: string | null): Promise<FySummaryRow[]
   if (error) throw new Error(`fy_summary failed: ${error.message}`);
   return (data ?? []) as FySummaryRow[];
 }
+
+export type BusinessSnapshot = {
+  outstanding_amount: number;
+  outstanding_count: number;
+  overdue_amount: number;
+  overdue_count: number;
+  billed_this_month: number;
+  billed_this_fy: number;
+  billed_all_time: number;
+  paid_all_time: number;
+};
+
+export async function businessSnapshot(): Promise<BusinessSnapshot | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("business_snapshot");
+  if (error) throw new Error(`business_snapshot failed: ${error.message}`);
+  const rows = (data ?? []) as BusinessSnapshot[];
+  return rows[0] ?? null;
+}
+
+export type OverdueInvoiceRow = {
+  invoice_number: number;
+  client_name: string;
+  issuer: string;
+  due_date: string;
+  days_overdue: number;
+  balance_due: number;
+};
+
+export async function overdueInvoices(): Promise<OverdueInvoiceRow[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("overdue_invoices");
+  if (error) throw new Error(`overdue_invoices failed: ${error.message}`);
+  return (data ?? []) as OverdueInvoiceRow[];
+}
+
+export type ClientSummaryRow = {
+  client_name: string;
+  billed_all_time: number;
+  paid_all_time: number;
+  outstanding: number;
+  unpaid_count: number;
+  overdue_count: number;
+  last_invoice_date: string | null;
+};
+
+export async function clientSummary(name: string): Promise<ClientSummaryRow[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("client_summary", { p_name: name });
+  if (error) throw new Error(`client_summary failed: ${error.message}`);
+  return (data ?? []) as ClientSummaryRow[];
+}
+
+export type FindInvoicesFilters = {
+  client?: string | null;
+  issuer?: string | null;
+  status?: string | null;
+  from?: string | null;
+  to?: string | null;
+  limit?: number | null;
+};
+
+export type FindInvoiceRow = {
+  invoice_number: number;
+  client_name: string;
+  issuer: string;
+  invoice_date: string;
+  due_date: string;
+  total: number;
+  balance_due: number;
+  status: string;
+};
+
+export async function findInvoices(
+  f: FindInvoicesFilters,
+): Promise<FindInvoiceRow[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("find_invoices", {
+    p_client: f.client ?? null,
+    p_issuer: f.issuer ?? null,
+    p_status: f.status ?? null,
+    p_from: f.from ?? null,
+    p_to: f.to ?? null,
+    p_limit: f.limit ?? 20,
+  });
+  if (error) throw new Error(`find_invoices failed: ${error.message}`);
+  return (data ?? []) as FindInvoiceRow[];
+}

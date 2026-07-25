@@ -46,6 +46,8 @@ export interface CompanyProfile {
   payment_note: string;
   email_subject_template: string;
   email_body_template: string;
+  statement_subject_template: string;
+  statement_body_template: string;
 }
 
 export interface AgentKey {

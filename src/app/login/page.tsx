@@ -56,14 +56,18 @@ export default async function LoginPage({
         <main className="mx-auto max-w-5xl px-6">
           {/* Hero */}
           <section className="py-20 sm:py-28">
+            <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+              Awesome Services Billing System
+            </p>
             <h1 className="max-w-3xl text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl">
               Invoicing an AI can actually run.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 dark:text-slate-400">
-              Raise an invoice, find out who owes you, chase what is late and
-              get your tax paperwork ready, all by asking for it. Whatever AI
-              assistant you already talk to can do the work, and every record
-              lands in the same place.
+              Raise an invoice, find out who owes you, chase what is late, email
+              a client their bill and get your tax paperwork ready, all by asking
+              for it in plain words. Whatever AI you already talk to does the
+              work, every record lands in the same place, and it is all yours to
+              keep.
             </p>
 
             {message && (
@@ -99,8 +103,9 @@ export default async function LoginPage({
                 And Hermes is only one way in
               </h3>
               <p className="mt-2 max-w-2xl text-slate-600 dark:text-slate-400">
-                Your books are not locked to a single assistant. Any AI you
-                connect to them can do the same work, using the same rules.
+                Your books are not locked to a single assistant. Everything sits
+                behind one API, so any AI you connect, on your phone, your
+                desktop or a server, does the same work with the same rules.
               </p>
 
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -109,27 +114,29 @@ export default async function LoginPage({
                   body="Message it on the way to a job and the answer comes back in the chat, file attached."
                 />
                 <Card
-                  title="Claude and Codex"
-                  body="The assistants already open on your desktop or in your terminal. Same books, nothing to configure per tool."
+                  title="Claude, Codex and more"
+                  body="The assistants already open on your desktop or in your terminal. Same books, nothing to set up per tool."
                 />
                 <Card
-                  title="Any AI over MCP"
-                  body="Point a new assistant at your database through MCP and it can raise invoices and answer questions from day one."
+                  title="Agents like OpenClaw"
+                  body="Autonomous agents running on their own can bill, chase and report without you in the loop."
                 />
                 <Card
-                  title="Built for whatever comes next"
-                  body="The rules live with your data, not inside one assistant, so a better AI next year inherits all of them for free."
+                  title="One open API, REST and MCP"
+                  body="Any AI understands it from day one. A better model next year plugs in the same way and inherits every rule for free."
                 />
               </div>
 
               <div className="mt-6 rounded-2xl bg-slate-50 p-6 dark:bg-slate-900">
-                <h3 className="font-semibold">It sends the email, too</h3>
+                <h3 className="font-semibold">
+                  It emails your clients, in one message
+                </h3>
                 <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                  Ask it to send and the invoice or the reminder goes straight
-                  to your client&apos;s inbox, with the document attached. From
-                  the moment you ask to the moment your client reads it, you do
-                  not open a single file. That is the whole point: end to end,
-                  with you only saying what you want.
+                  Ask it to send and the invoice, or a whole client&apos;s
+                  statement, goes straight to their inbox with the document
+                  attached and a friendly note, written for you. One message from
+                  you, and your client has the bill. Every agent has its own
+                  email, so the same request works no matter which AI you asked.
                 </p>
               </div>
             </div>
@@ -180,6 +187,10 @@ export default async function LoginPage({
           >
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Card
+                title="Answers and reports, just by asking"
+                body="Ask a question in plain words and get the number back: who owes you, what is overdue, what you billed this month, this financial year, or all time. No dashboards to build."
+              />
+              <Card
                 title="Invoices, ready to send"
                 body="Numbered, filed and printed the second you ask for one. Send it straight to your client from wherever you asked."
               />
@@ -196,12 +207,52 @@ export default async function LoginPage({
                 body="A full financial year of invoices for one business, in a single file you can hand straight to your accountant."
               />
               <Card
-                title="Know where you stand"
-                body="What you are owed, what has gone past its due date and what you have billed this year, updated the instant anything changes."
-              />
-              <Card
                 title="Clients that stay current"
                 body="Rates, addresses and details in one place. Change them once and every future invoice picks them up."
+              />
+            </div>
+          </Section>
+
+          {/* History */}
+          <Section
+            eyebrow="Your record"
+            title="Every year, kept forever"
+            lead="Nothing ages out and nothing gets archived away. Every invoice, payment and change stays on the record, financial year after financial year, as one complete history of your business."
+          >
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Card
+                title="One unbroken timeline"
+                body="From your very first invoice to the one you raised this morning, every operation is kept in full. Nothing is ever quietly dropped."
+              />
+              <Card
+                title="Every financial year, on file"
+                body="Each year closes into a complete record you can reopen any time, so last year and five years ago are as reachable as today."
+              />
+              <Card
+                title="Your AI can read all of it"
+                body="Ask a question that spans years and the answer is there, because every agent can reach the whole history to report on it, not just the last few weeks."
+              />
+            </div>
+          </Section>
+
+          {/* Backups */}
+          <Section
+            eyebrow="Peace of mind"
+            title="Back up everything, in one click"
+            lead="Your business runs on these records, so losing them is not an option. Take a full copy of your entire history whenever you want, and keep it safe on your own."
+          >
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Card
+                title="One click, the whole lot"
+                body="Every client, invoice and line item in a single export. No selecting, no piecing it together, one button and it is done."
+              />
+              <Card
+                title="Or just ask your AI"
+                body="Tell any assistant to back up your books and the copy is made for you, the same as everything else."
+              />
+              <Card
+                title="Never lose your business"
+                body="Keep a copy wherever you trust, so a bad day for any one service can never take your history with it."
               />
             </div>
           </Section>
@@ -250,6 +301,10 @@ export default async function LoginPage({
               <Guard
                 title="The AI asks before it deletes"
                 detail="Every other action can be undone. Deleting an invoice is the one thing that needs a human yes first."
+              />
+              <Guard
+                title="Every agent has its own key"
+                detail="Each assistant gets a key you hand out and can take back on its own. Retire one and the rest keep working, untouched."
               />
               <Guard
                 title="Invoices you already sent never change"

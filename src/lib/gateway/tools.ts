@@ -18,6 +18,10 @@ import {
   recentInvoices,
   billedInPeriod,
   fySummary,
+  businessSnapshot,
+  overdueInvoices,
+  clientSummary,
+  findInvoices,
 } from "@/lib/data/reports";
 import {
   listClients,
@@ -30,6 +34,7 @@ import {
   renderClientStatementPdf,
   renderTaxStatementPdf,
   prepareClientEmail,
+  prepareClientStatementEmail,
   resolveClient,
   resolveIssuer,
 } from "./documents";
@@ -94,9 +99,37 @@ function clientInput(input: ToolInput): ClientInput {
 // -- the registry -----------------------------------------------------------
 export const tools: Record<string, ToolDef> = {
   // reads
+  business_snapshot: {
+    description:
+      "The daily pulse in one call: outstanding + overdue, unpaid count, billed this month / this FY / all time, and paid all time.",
+    handler: () => businessSnapshot(),
+  },
   who_owes: {
     description: "Every client with an unpaid balance: amount, count, overdue.",
     handler: () => whoOwes(),
+  },
+  overdue_invoices: {
+    description:
+      "Flat list of every overdue unpaid invoice: number, client, ABN, due date, days overdue, balance.",
+    handler: () => overdueInvoices(),
+  },
+  client_summary: {
+    description:
+      "Per-client snapshot: billed all-time, paid, outstanding, unpaid/overdue counts, last invoice date. Args: client (name).",
+    handler: (input) => clientSummary(reqStr(input, "client")),
+  },
+  find_invoices: {
+    description:
+      "Bounded invoice search. All optional: client, issuer, status (unpaid/paid/cancelled), from, to (YYYY-MM-DD), limit (default 20). Newest first.",
+    handler: (input) =>
+      findInvoices({
+        client: optStr(input, "client"),
+        issuer: optStr(input, "issuer"),
+        status: optStr(input, "status"),
+        from: optStr(input, "from"),
+        to: optStr(input, "to"),
+        limit: optNum(input, "limit"),
+      }),
   },
   client_account: {
     description: "A client's unpaid invoices with balances. Args: client (name).",
@@ -164,6 +197,15 @@ export const tools: Record<string, ToolDef> = {
         invoices: Array.isArray(input.invoices)
           ? (input.invoices as number[])
           : null,
+      }),
+  },
+  prepare_client_statement_email: {
+    description:
+      "Recipient + filled template + that client's account-statement PDF (base64) to email a client. Args: client (name) or client_id. Recipient and statement are always the same client, so they can't be crossed.",
+    handler: (input) =>
+      prepareClientStatementEmail({
+        client: optStr(input, "client"),
+        client_id: optStr(input, "client_id"),
       }),
   },
 
