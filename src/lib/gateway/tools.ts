@@ -29,6 +29,7 @@ import {
   updateClient,
   type ClientInput,
 } from "@/lib/data/clients";
+import { createBackup } from "@/lib/data/backup";
 import {
   renderInvoicePdf,
   renderClientStatementPdf,
@@ -158,6 +159,20 @@ export const tools: Record<string, ToolDef> = {
   list_clients: {
     description: "All clients with their details (incl. internal email).",
     handler: () => listClients(),
+  },
+  create_backup: {
+    description:
+      "A full backup of the business (clients, issuers, invoices, line items, company profile) as a JSON file in base64, for safe-keeping off the database. Args: none. Returns filename, counts and json_base64.",
+    handler: async () => {
+      const backup = await createBackup();
+      const json = JSON.stringify(backup);
+      return {
+        filename: `awesome-backup-${backup.meta.date}.json`,
+        generated_at: backup.meta.generated_at,
+        counts: backup.counts,
+        json_base64: Buffer.from(json).toString("base64"),
+      };
+    },
   },
 
   // documents (PDFs come back as base64; the agent attaches/forwards them)

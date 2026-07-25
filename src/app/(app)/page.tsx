@@ -154,6 +154,23 @@ export default async function OverviewPage() {
           </ul>
         )}
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200 dark:bg-slate-900/50 dark:ring-slate-800">
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-slate-100">
+            Back up your business
+          </p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Everything in one file. Never lose your data.
+          </p>
+        </div>
+        <Link
+          href="/backup"
+          className="shrink-0 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+        >
+          Back up
+        </Link>
+      </div>
     </div>
   );
 }
