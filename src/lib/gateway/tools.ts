@@ -151,6 +151,16 @@ function optNum(input: ToolInput, key: string): number | null {
 }
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
 /**
  * Validate the line items an agent sent.
  *
@@ -183,8 +193,9 @@ function items(input: ToolInput): NewInvoiceItem[] {
     if (!serviceDate) {
       throw new Error(
         `${at}.service_date is required (YYYY-MM-DD): the day the service was ` +
-          `performed. Ask the user which day it was, do not guess or use today ` +
-          `unless they said so.`,
+          `performed. If the user said something relative like "yesterday" or ` +
+          `"last Wednesday", call the "today" tool and work the date out from ` +
+          `that. Only ask them if it is genuinely unclear.`,
       );
     }
     if (!ISO_DATE.test(serviceDate) || Number.isNaN(Date.parse(serviceDate))) {
@@ -241,6 +252,28 @@ export const tools: Record<string, ToolDef> = {
       "The daily pulse in one call: outstanding + overdue, unpaid count, billed this month / this FY / all time, and paid all time.",
     schema: NO_ARGS,
     handler: () => businessSnapshot(),
+  },
+  today: {
+    description:
+      "Today's date in Australia/Sydney, plus the last 14 days with their weekday names. " +
+      "Use this to resolve what the user says (yesterday, last Wednesday, the 20th) into a " +
+      "YYYY-MM-DD date. Never work it out from your own clock: agents run on servers in " +
+      "other timezones and the business runs on Sydney time.",
+    schema: NO_ARGS,
+    handler: async () => {
+      const today = todayInSydney();
+      const [y, m, d] = today.split("-").map(Number);
+      const base = Date.UTC(y, m - 1, d);
+      const recent = Array.from({ length: 14 }, (_, i) => {
+        const day = new Date(base - i * 86_400_000);
+        return {
+          date: day.toISOString().slice(0, 10),
+          weekday: WEEKDAYS[day.getUTCDay()],
+          ...(i === 0 ? { is: "today" } : i === 1 ? { is: "yesterday" } : {}),
+        };
+      });
+      return { today, timezone: "Australia/Sydney", recent_days: recent };
+    },
   },
   who_owes: {
     description: "Every client with an unpaid balance: amount, count, overdue.",
