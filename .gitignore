@@ -48,5 +48,6 @@ next-env.d.ts
 /CLAUDE.md
 
 # VPS infrastructure for Mavi's assistant. Local backup only: this repo is
-# public and these files disclose the server layout. See vps/README.md.
+# public and these files disclose the server layout. The versioned copy lives
+# in the private Obsidian vault, under Hermes_Agent/. See vps/README.md.
 /vps
