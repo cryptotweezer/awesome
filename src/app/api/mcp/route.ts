@@ -84,7 +84,7 @@ async function handle(msg: Incoming, agent: Agent): Promise<object | null> {
           tools: Object.entries(tools).map(([name, def]) => ({
             name,
             description: def.description,
-            inputSchema: { type: "object", additionalProperties: true },
+            inputSchema: def.schema ?? { type: "object", additionalProperties: true },
           })),
         });
 
