@@ -1006,6 +1006,112 @@ set search_path to 'awesome', 'pg_catalog' as $$
 $$;
 
 -- ---------------------------------------------------------------------
+--  The dashboard assistant's allowance.
+--
+--  It runs on the deployment owner's own AI credit, so a trial business gets a
+--  fixed, all-time number of messages. Counting happens in one statement that
+--  both reads and writes, because two browser tabs asking at the same moment
+--  would otherwise each read the old number and both be let through.
+--  Returns how many are left; null means unlimited.
+-- ---------------------------------------------------------------------
+create or replace function awesome.consume_ai_message(p_org_id uuid)
+returns integer
+language plpgsql security definer
+set search_path to 'awesome', 'pg_catalog'
+as $$
+declare
+  v_cap  integer;
+  v_used integer;
+begin
+  select o.max_ai_messages, o.ai_messages_used
+    into v_cap, v_used
+    from awesome.orgs o
+   where o.id = p_org_id
+     for update;
+
+  if not found then
+    raise exception 'consume_ai_message: organisation % not found', p_org_id;
+  end if;
+  if v_cap is null then
+    return null;
+  end if;
+  if v_used >= v_cap then
+    raise exception
+      'You have used all % assistant messages that come with a trial account. Connect your own AI to keep going: it runs on your account and has no limit.',
+      v_cap;
+  end if;
+
+  update awesome.orgs
+     set ai_messages_used = ai_messages_used + 1
+   where id = p_org_id;
+
+  return v_cap - v_used - 1;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+--  Trial businesses are deleted after a month of silence.
+--
+--  Activity is DERIVED rather than tracked. Trusting a "last seen" column
+--  alone would delete a business that stays signed in and works here every
+--  day, since such a column only moves on sign-in. Writing a heartbeat on
+--  every page render would fix that and cost a database write per page view,
+--  for a fact the data already knows.
+--
+--  The deletes are explicit and ordered rather than left to ON DELETE CASCADE:
+--  cascading from `orgs` fans out to clients, issuers and invoices at once,
+--  and the invoice -> client and invoice -> issuer foreign keys have no
+--  cascade of their own, so the order it happened to pick could fail.
+-- ---------------------------------------------------------------------
+create or replace function awesome.purge_stale_demo_orgs(p_days integer default 30)
+returns table(purged_org_id uuid, purged_name text)
+language plpgsql security definer
+set search_path to 'awesome', 'pg_catalog'
+as $$
+declare
+  v_cutoff timestamptz := now() - make_interval(days => greatest(coalesce(p_days, 30), 1));
+begin
+  return query
+  with doomed as (
+    select o.id, o.name
+      from awesome.orgs o
+     where o.is_demo
+       and greatest(
+             o.last_active_at,
+             o.updated_at,
+             o.created_at,
+             coalesce((select max(i.updated_at) from awesome.invoices i where i.org_id = o.id),
+                      '-infinity'::timestamptz),
+             coalesce((select max(k.last_used_at) from awesome.agent_keys k where k.org_id = o.id),
+                      '-infinity'::timestamptz)
+           ) < v_cutoff
+  ),
+  del_items as (
+    delete from awesome.invoice_items i where i.org_id in (select id from doomed) returning 1
+  ),
+  del_invoices as (
+    delete from awesome.invoices i where i.org_id in (select id from doomed) returning 1
+  ),
+  del_clients as (
+    delete from awesome.clients c where c.org_id in (select id from doomed) returning 1
+  ),
+  del_issuers as (
+    delete from awesome.issuers s where s.org_id in (select id from doomed) returning 1
+  ),
+  del_keys as (
+    delete from awesome.agent_keys k where k.org_id in (select id from doomed) returning 1
+  ),
+  del_members as (
+    delete from awesome.org_members m where m.org_id in (select id from doomed) returning 1
+  ),
+  del_orgs as (
+    delete from awesome.orgs o where o.id in (select id from doomed) returning o.id, o.name
+  )
+  select d.id, d.name from del_orgs d;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
 --  Lock the surface. SECURITY DEFINER functions bypass RLS, so anon and
 --  authenticated must never be able to call one.
 -- ---------------------------------------------------------------------
