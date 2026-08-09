@@ -110,6 +110,49 @@ describe("creating a business", () => {
   });
 });
 
+describe("a brand new business, with nothing in it yet", () => {
+  // The very first screen anybody sees after signing up. Every one of these
+  // runs before they have a single client, so an empty result that comes back
+  // as no row at all, rather than as zeros, is a crashed dashboard on someone's
+  // first impression.
+  const reads = [
+    ["business_snapshot", {}],
+    ["who_owes", {}],
+    ["overdue_invoices", {}],
+    ["recent_invoices", { p_name: null, p_limit: 10 }],
+    ["find_invoices", {
+      p_client: null, p_issuer: null, p_status: null,
+      p_from: null, p_to: null, p_limit: 20,
+    }],
+    ["fy_summary", { p_fy_start: null }],
+    ["billed_in_period", { p_from: "2000-01-01", p_to: "2100-01-01", p_issuer: null }],
+    ["client_summary", { p_name: "anything" }],
+    ["client_account", { p_name: "anything" }],
+    ["peek_next_invoice_number", {}],
+  ];
+
+  for (const [fn, args] of reads) {
+    test(`${fn} answers without data to answer from`, async () => {
+      const { data, error } = await db.rpc(fn, { ...args, p_org_id: orgId });
+      assert.equal(error, null, error?.message);
+      assert.notEqual(data, undefined, `${fn} returned nothing at all`);
+    });
+  }
+
+  test("the snapshot reads as zeros, not as an empty result", async () => {
+    const { data } = await db.rpc("business_snapshot", { p_org_id: orgId });
+    assert.equal(data.length, 1, "an empty business produced no snapshot row");
+    assert.equal(Number(data[0].outstanding_amount), 0);
+    assert.equal(Number(data[0].billed_all_time), 0);
+    assert.equal(data[0].outstanding_count, 0);
+  });
+
+  test("their first invoice will be #1", async () => {
+    const { data } = await db.rpc("peek_next_invoice_number", { p_org_id: orgId });
+    assert.equal(Number(data), 1);
+  });
+});
+
 describe("a business cannot be created half-formed", () => {
   const blankUser = randomUUID();
 
