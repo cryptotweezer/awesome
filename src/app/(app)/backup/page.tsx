@@ -1,11 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg } from "@/lib/data/org";
 
-async function getCounts() {
+async function getCounts(orgId: string) {
   const s = createAdminClient();
+  const head = { count: "exact" as const, head: true };
   const [inv, cli, iss] = await Promise.all([
-    s.from("invoices").select("*", { count: "exact", head: true }),
-    s.from("clients").select("*", { count: "exact", head: true }),
-    s.from("issuers").select("*", { count: "exact", head: true }),
+    s.from("invoices").select("*", head).eq("org_id", orgId),
+    s.from("clients").select("*", head).eq("org_id", orgId),
+    s.from("issuers").select("*", head).eq("org_id", orgId),
   ]);
   return {
     invoices: inv.count ?? 0,
@@ -15,7 +17,8 @@ async function getCounts() {
 }
 
 export default async function BackupPage() {
-  const counts = await getCounts();
+  const { org } = await requireOrg();
+  const counts = await getCounts(org.id);
 
   return (
     <div className="space-y-6">

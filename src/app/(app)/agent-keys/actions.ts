@@ -6,6 +6,7 @@ import {
   setAgentKeyActive,
   deleteAgentKey,
 } from "@/lib/data/agent-keys";
+import { requireOrg } from "@/lib/data/org";
 
 export type KeyActionState = {
   ok: boolean;
@@ -25,7 +26,8 @@ export async function mintKeyAction(
   const label = (formData.get("label") as string | null)?.trim();
   if (!label) return { ok: false, error: "Label is required." };
   try {
-    const { key } = await mintAgentKey(label);
+    const { org } = await requireOrg();
+    const { key } = await mintAgentKey(org.id, label);
     revalidatePath("/agent-keys");
     return { ok: true, key, label };
   } catch (e) {
@@ -39,7 +41,8 @@ export async function revokeKeyAction(
 ): Promise<KeyActionState> {
   const id = formData.get("id") as string;
   try {
-    await setAgentKeyActive(id, false);
+    const { org } = await requireOrg();
+    await setAgentKeyActive(org.id, id, false);
     revalidatePath("/agent-keys");
     return { ok: true };
   } catch (e) {
@@ -53,7 +56,8 @@ export async function reactivateKeyAction(
 ): Promise<KeyActionState> {
   const id = formData.get("id") as string;
   try {
-    await setAgentKeyActive(id, true);
+    const { org } = await requireOrg();
+    await setAgentKeyActive(org.id, id, true);
     revalidatePath("/agent-keys");
     return { ok: true };
   } catch (e) {
@@ -67,7 +71,8 @@ export async function deleteKeyAction(
 ): Promise<KeyActionState> {
   const id = formData.get("id") as string;
   try {
-    await deleteAgentKey(id);
+    const { org } = await requireOrg();
+    await deleteAgentKey(org.id, id);
     revalidatePath("/agent-keys");
     return { ok: true };
   } catch (e) {

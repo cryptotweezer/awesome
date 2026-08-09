@@ -1,18 +1,19 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { todayInSydney } from "@/lib/format";
-import type { Invoice, InvoiceItem, InvoiceStatus } from "@/lib/types";
+import { todayInSydney, todayInTimezone } from "@/lib/format";
+import type { Invoice, InvoiceItem, InvoiceStatus, Org } from "@/lib/types";
 
 export type InvoiceListRow = Invoice & {
   issuer: { short_name: string } | null;
   invoice_items: { service_date: string | null }[];
 };
 
-export async function listInvoices(): Promise<InvoiceListRow[]> {
+export async function listInvoices(orgId: string): Promise<InvoiceListRow[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
     .select("*, issuer:issuers(short_name), invoice_items(service_date)")
+    .eq("org_id", orgId)
     .order("invoice_number", { ascending: true });
   if (error) throw new Error(`Failed to load invoices: ${error.message}`);
   return (data ?? []) as unknown as InvoiceListRow[];
@@ -23,11 +24,15 @@ export type InvoiceDetail = Invoice & {
   invoice_items: InvoiceItem[];
 };
 
-export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
+export async function getInvoice(
+  orgId: string,
+  id: string,
+): Promise<InvoiceDetail | null> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
     .select("*, issuer:issuers(short_name), invoice_items(*)")
+    .eq("org_id", orgId)
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(`Failed to load invoice: ${error.message}`);
@@ -42,17 +47,23 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
  * Resolve an invoice by EITHER its UUID or its invoice_number, so an agent can
  * ask for "1954" without first resolving a UUID. An all-digit ref is treated as
  * an invoice number; anything else falls back to a UUID lookup.
+ *
+ * The org filter is what makes a bare number safe now that numbers repeat
+ * across organisations: every business can have a #1, and each one only ever
+ * resolves to its own.
  */
 export async function getInvoiceByRef(
+  orgId: string,
   ref: string,
 ): Promise<InvoiceDetail | null> {
   const trimmed = ref.trim();
-  if (!/^\d+$/.test(trimmed)) return getInvoice(trimmed);
+  if (!/^\d+$/.test(trimmed)) return getInvoice(orgId, trimmed);
 
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
     .select("*, issuer:issuers(short_name), invoice_items(*)")
+    .eq("org_id", orgId)
     .eq("invoice_number", Number(trimmed))
     .maybeSingle();
   if (error) throw new Error(`Failed to load invoice: ${error.message}`);
@@ -63,14 +74,18 @@ export async function getInvoiceByRef(
 }
 
 /**
- * The number the next inserted invoice WOULD receive, without consuming the
- * sequence. This is an estimate for display only — the definitive number is
- * assigned atomically by the DB at insert time and can never collide, even if
- * the dashboard and the AI create invoices simultaneously.
+ * The number the next invoice WOULD receive, without taking it. Display only:
+ * the definitive number is assigned atomically by the DB at insert time from
+ * this organisation's own counter, so it can never collide even if the
+ * dashboard and an agent create an invoice at the same moment.
  */
-export async function getNextInvoiceNumber(): Promise<number | null> {
+export async function getNextInvoiceNumber(
+  orgId: string,
+): Promise<number | null> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase.rpc("peek_next_invoice_number");
+  const { data, error } = await supabase.rpc("peek_next_invoice_number", {
+    p_org_id: orgId,
+  });
   if (error) {
     // Non-fatal: the form just won't show a preview.
     console.error("peek_next_invoice_number failed:", error.message);
@@ -108,18 +123,23 @@ export type OutstandingSummary = {
 
 /**
  * Aggregate every unpaid invoice into a per-client outstanding summary,
- * splitting overdue (past the 7-day term) from those still within term. Overdue
+ * splitting overdue (past the org's term) from those still within term. Overdue
  * is DERIVED here (due_date < today), never stored.
  */
-export async function getOutstandingSummary(): Promise<OutstandingSummary> {
+export async function getOutstandingSummary(
+  org: Org,
+): Promise<OutstandingSummary> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
     .select("id, invoice_number, bill_to_name, balance_due, due_date, status")
+    .eq("org_id", org.id)
     .eq("status", "unpaid");
   if (error) throw new Error(`Failed to load outstanding: ${error.message}`);
 
-  const today = todayInSydney();
+  // Overdue is decided in the business's own time zone, so a Perth invoice is
+  // not overdue two hours early because the server thinks in Sydney time.
+  const today = todayInTimezone(org.timezone);
   const rows = data ?? [];
 
   let totalAmount = 0;
@@ -179,25 +199,38 @@ export async function getOutstandingSummary(): Promise<OutstandingSummary> {
 }
 
 /**
- * Start of the current Australian financial year (1 Jul – 30 Jun) as YYYY-MM-DD.
- * Rolls over on its own — no config to remember every July.
+ * Start of the financial year that contains `today`, as YYYY-MM-DD. Rolls over
+ * on its own, so there is no config to remember every July.
+ *
+ * `startMonth` comes from the business (`orgs.fy_start_month`) and is 7
+ * everywhere today, the Australian financial year. It is a parameter rather
+ * than a constant so a business in another country is a data change.
  */
-export function financialYearStart(today: string = todayInSydney()): string {
+export function financialYearStart(
+  today: string = todayInSydney(),
+  startMonth = 7,
+): string {
   const [y, m] = today.split("-").map(Number);
-  // Jan–Jun still belong to the FY that started the previous July.
-  const startYear = m >= 7 ? y : y - 1;
-  return `${startYear}-07-01`;
+  // Months before the start month still belong to the FY that began last year.
+  const startYear = m >= startMonth ? y : y - 1;
+  return `${startYear}-${String(startMonth).padStart(2, "0")}-01`;
 }
 
 /** "FY 2026-27" for the FY that began on the given start date. */
 export function financialYearLabel(start: string): string {
   const y = Number(start.slice(0, 4));
+  const month = Number(start.slice(5, 7));
+  // A year that starts in January is just that calendar year.
+  if (month === 1) return `FY ${y}`;
   return `FY ${y}-${String((y + 1) % 100).padStart(2, "0")}`;
 }
 
 /** Last day of the FY that began on the given start date. */
 export function financialYearEnd(start: string): string {
-  return `${Number(start.slice(0, 4)) + 1}-06-30`;
+  const [y, m] = start.split("-").map(Number);
+  const end = new Date(Date.UTC(y + 1, m - 1, 1));
+  end.setUTCDate(0); // the day before, i.e. the last day of the previous month
+  return end.toISOString().slice(0, 10);
 }
 
 export type PeriodTotal = { fy: number; all: number };
@@ -217,14 +250,18 @@ export type BillingTotals = {
  * ABN has billed. Both split into the current financial year and all time.
  * Bucketed by `invoice_date` — there is no separate payment date on record.
  */
-export async function getBillingTotals(): Promise<BillingTotals> {
+export async function getBillingTotals(org: Org): Promise<BillingTotals> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
-    .select("invoice_date, total, status, issuer:issuers(short_name)");
+    .select("invoice_date, total, status, issuer:issuers(short_name)")
+    .eq("org_id", org.id);
   if (error) throw new Error(`Failed to load totals: ${error.message}`);
 
-  const fyStart = financialYearStart();
+  const fyStart = financialYearStart(
+    todayInTimezone(org.timezone),
+    org.fy_start_month,
+  );
   const paid: PeriodTotal = { fy: 0, all: 0 };
   const byIssuer = new Map<string, PeriodTotal>();
 
@@ -278,12 +315,16 @@ export type NewInvoiceInput = {
   items: NewInvoiceItem[];
 };
 
-export async function createInvoice(input: NewInvoiceInput): Promise<Invoice> {
+export async function createInvoice(
+  orgId: string,
+  input: NewInvoiceInput,
+): Promise<Invoice> {
   const supabase = createAdminClient();
-  // Atomic in the DB (awesome.create_invoice): snapshots the client + issuer,
-  // inserts the header and the items in ONE transaction and rejects an empty
-  // item list. This is the same function every agent calls, so the rules live
-  // in Postgres, not here.
+  // Atomic in the DB (awesome.create_invoice): takes the next number from this
+  // organisation's counter, snapshots the client + issuer, inserts the header
+  // and the items in ONE transaction, and refuses a client or issuer belonging
+  // to anybody else. This is the same function every agent calls, so the rules
+  // live in Postgres, not here.
   const { data, error } = await supabase.rpc("create_invoice", {
     p_client_id: input.client_id,
     p_issuer_id: input.issuer_id,
@@ -291,6 +332,7 @@ export async function createInvoice(input: NewInvoiceInput): Promise<Invoice> {
     p_created_by: input.created_by,
     p_items: input.items,
     p_internal_notes: input.internal_notes,
+    p_org_id: orgId,
   });
   if (error || !data) {
     throw new Error(`Failed to create invoice: ${error?.message}`);
@@ -313,13 +355,14 @@ export type UpdateInvoiceInput = {
  * balance_due and status. Available to the dashboard AND the AI (fix a mistake).
  */
 export async function updateInvoice(
+  orgId: string,
   id: string,
   input: UpdateInvoiceInput,
 ): Promise<Invoice> {
   const supabase = createAdminClient();
   // Atomic in the DB (awesome.update_invoice): re-snapshots the client + issuer
-  // and fully replaces the line items in one transaction. invoice_number and
-  // created_by are never touched.
+  // and fully replaces the line items in one transaction. invoice_number,
+  // org_id and created_by are never touched.
   const { data, error } = await supabase.rpc("update_invoice", {
     p_id: id,
     p_client_id: input.client_id,
@@ -327,6 +370,7 @@ export async function updateInvoice(
     p_invoice_date: input.invoice_date,
     p_items: input.items,
     p_internal_notes: input.internal_notes,
+    p_org_id: orgId,
   });
   if (error || !data) {
     throw new Error(`Failed to update invoice: ${error?.message}`);
@@ -339,11 +383,15 @@ export async function updateInvoice(
  * (unlike cancel, which keeps the record). For the AI, deletion is the one
  * action that must always ask the user for confirmation first.
  */
-export async function deleteInvoice(id: string): Promise<void> {
+export async function deleteInvoice(orgId: string, id: string): Promise<void> {
   const supabase = createAdminClient();
-  // Atomic in the DB: deletes items + invoice AND resyncs the number sequence
-  // so deleting the latest invoice reclaims its number (floor stays at 1945).
-  const { error } = await supabase.rpc("delete_invoice", { p_id: id });
+  // Atomic in the DB: deletes items + invoice AND rewinds this organisation's
+  // counter, so deleting the latest invoice reclaims its number. The floor is
+  // the org's own starting point (1945 for Awesome, 1 for a new business).
+  const { error } = await supabase.rpc("delete_invoice", {
+    p_id: id,
+    p_org_id: orgId,
+  });
   if (error) throw new Error(`Failed to delete invoice: ${error.message}`);
 }
 
@@ -352,23 +400,32 @@ export async function deleteInvoice(id: string): Promise<void> {
  * paid_amount = total and the trigger derives status = paid, balance_due = 0.
  * Rejected on a cancelled invoice (reactivate it first).
  */
-export async function markPaid(id: string): Promise<void> {
+export async function markPaid(orgId: string, id: string): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase.rpc("mark_paid", { p_id: id });
+  const { error } = await supabase.rpc("mark_paid", {
+    p_id: id,
+    p_org_id: orgId,
+  });
   if (error) throw new Error(`Failed to mark paid: ${error.message}`);
 }
 
 /** Undo a payment: paid_amount back to 0, status re-derived to unpaid. */
-export async function markUnpaid(id: string): Promise<void> {
+export async function markUnpaid(orgId: string, id: string): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase.rpc("mark_unpaid", { p_id: id });
+  const { error } = await supabase.rpc("mark_unpaid", {
+    p_id: id,
+    p_org_id: orgId,
+  });
   if (error) throw new Error(`Failed to mark unpaid: ${error.message}`);
 }
 
 /** Cancel an invoice: status = cancelled, the number is kept (never released). */
-export async function cancelInvoice(id: string): Promise<void> {
+export async function cancelInvoice(orgId: string, id: string): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase.rpc("cancel_invoice", { p_id: id });
+  const { error } = await supabase.rpc("cancel_invoice", {
+    p_id: id,
+    p_org_id: orgId,
+  });
   if (error) throw new Error(`Failed to cancel invoice: ${error.message}`);
 }
 
@@ -377,8 +434,14 @@ export async function cancelInvoice(id: string): Promise<void> {
  * status so the trigger re-derives the real one from paid_amount, landing back
  * on unpaid or paid on its own.
  */
-export async function reactivateInvoice(id: string): Promise<void> {
+export async function reactivateInvoice(
+  orgId: string,
+  id: string,
+): Promise<void> {
   const supabase = createAdminClient();
-  const { error } = await supabase.rpc("reactivate_invoice", { p_id: id });
+  const { error } = await supabase.rpc("reactivate_invoice", {
+    p_id: id,
+    p_org_id: orgId,
+  });
   if (error) throw new Error(`Failed to reactivate invoice: ${error.message}`);
 }

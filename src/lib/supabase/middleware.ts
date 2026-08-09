@@ -1,46 +1,43 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isAllowedEmail } from "@/lib/auth";
+import { isAllowedEmail, isGuestSignupEnabled } from "@/lib/auth";
 
-/** Constant-time-ish compare so the key can't be probed byte by byte. */
-function keyMatches(provided: string, expected: string): boolean {
-  if (provided.length !== expected.length) return false;
-  let diff = 0;
-  for (let i = 0; i < provided.length; i++) {
-    diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-  return diff === 0;
-}
-
-function isHermesPdfRequest(request: NextRequest): boolean {
-  const expected = process.env.HERMES_API_KEY;
-  if (!expected) return false;
-  if (!request.nextUrl.pathname.endsWith("/pdf")) return false;
-  const provided = request.headers.get("x-api-key");
-  return Boolean(provided && keyMatches(provided, expected));
-}
+// A shared-secret bypass used to live here: any path ending in /pdf carrying
+// `x-api-key: HERMES_API_KEY` skipped the session check entirely. It was left
+// inert when the gateway replaced Hermes, and it has now been removed outright.
+// With registration open it would have been a way to fetch documents without a
+// session and without an organisation, which is precisely what must not exist.
 
 /**
- * The gateway endpoints authenticate themselves with a per-agent key (see
- * src/lib/gateway/auth.ts), so they must skip the browser-session enforcement
- * and reach their route handler, which returns a proper 401 instead of a
- * redirect to /login.
+ * Endpoints that carry their own credential and have no browser session:
+ * the gateway authenticates with a per-agent key (src/lib/gateway/auth.ts) and
+ * the cron endpoint with CRON_SECRET. They skip the session check so they reach
+ * their handler and can answer 401 properly, instead of being redirected to a
+ * login page a machine cannot use.
+ *
+ * Everything else, including /api/chat, needs a signed-in user.
  */
-function isGatewayRequest(request: NextRequest): boolean {
+function isSelfAuthenticated(request: NextRequest): boolean {
   const path = request.nextUrl.pathname;
-  return path.startsWith("/api/agent") || path.startsWith("/api/mcp");
+  return (
+    path.startsWith("/api/agent") ||
+    path.startsWith("/api/mcp") ||
+    path.startsWith("/api/cron")
+  );
 }
 
 /**
- * Runs on every request: refreshes the Supabase session cookie and enforces
- * access. Public paths are /login and /auth/*; everything else requires an
- * authenticated AND whitelisted user.
+ * Runs on every request: refreshes the Supabase session cookie and decides who
+ * gets past the door. Public paths are /login and /auth/*; everything else
+ * needs a signed-in user.
+ *
+ * What it deliberately does NOT do is look up the user's organisation. That
+ * would be a database round trip on every single request, so it happens once
+ * per page in the app layout instead, which redirects to /onboarding when the
+ * user has no business yet.
  */
 export async function updateSession(request: NextRequest) {
-  // Hermes/Ema has no browser session, so it authenticates the PDF endpoints
-  // with a shared key instead. Inert until HERMES_API_KEY is set in the env,
-  // and deliberately scoped to `/pdf` only — never to the rest of the app.
-  if (isHermesPdfRequest(request) || isGatewayRequest(request)) {
+  if (isSelfAuthenticated(request)) {
     return NextResponse.next({ request });
   }
 
@@ -74,8 +71,10 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isPublic = path.startsWith("/login") || path.startsWith("/auth");
 
-  // Signed in but not on the whitelist → force sign out.
-  if (user && !isAllowedEmail(user.email)) {
+  // Signed in, not on the staff list, and guest signup is closed → force sign
+  // out. Flipping GUEST_SIGNUP to "true" is what opens the door to strangers,
+  // and it is an env var precisely so opening it needs no deploy.
+  if (user && !isAllowedEmail(user.email) && !isGuestSignupEnabled()) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/signout";
     url.searchParams.set("error", "unauthorized");

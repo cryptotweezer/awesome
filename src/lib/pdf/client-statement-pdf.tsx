@@ -1,6 +1,7 @@
 import "server-only";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { CompanyProfile } from "@/lib/types";
+import type { Logo } from "./logo";
 import type { ClientStatement } from "@/lib/data/statements";
 import { formatDate } from "@/lib/format";
 import {
@@ -70,9 +71,11 @@ const s = StyleSheet.create({
 export function ClientStatementDocument({
   statement,
   company,
+  logo,
 }: {
   statement: ClientStatement;
   company: CompanyProfile;
+  logo: Logo | null;
 }) {
   const { client } = statement;
   const billTo = [
@@ -87,7 +90,7 @@ export function ClientStatementDocument({
       author={company.business_name}
     >
       <Page size="A4" style={base.page}>
-        <CompanyLetterHead company={company} />
+        <CompanyLetterHead company={company} logo={logo} />
 
         <View style={s.midRow}>
           <View>

@@ -19,24 +19,42 @@ export function FyStatementPicker({
   const [fy, setFy] = useState(years[0]?.start ?? "");
   const href = issuerId ? `/statements/fy/${issuerId}/pdf?fy=${fy}` : "";
 
+  // With a single ABN there is nothing to choose, so the picker becomes a
+  // label. Only a business with two entities, like this one, needs to decide.
+  const soleIssuer = issuers.length === 1 ? issuers[0] : null;
+
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-          ABN
-        </span>
-        <select
-          value={issuerId}
-          onChange={(e) => setIssuerId(e.target.value)}
-          className="min-w-[13rem] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
-        >
-          {issuers.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.short_name} — {i.abn}
-            </option>
-          ))}
-        </select>
-      </label>
+      {soleIssuer ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            ABN
+          </span>
+          <p className="py-2 text-sm text-slate-700 dark:text-slate-300">
+            {soleIssuer.short_name}{" "}
+            <span className="text-slate-400 dark:text-slate-500">
+              {soleIssuer.abn}
+            </span>
+          </p>
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            ABN
+          </span>
+          <select
+            value={issuerId}
+            onChange={(e) => setIssuerId(e.target.value)}
+            className="min-w-[13rem] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
+          >
+            {issuers.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.short_name} — {i.abn}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400">

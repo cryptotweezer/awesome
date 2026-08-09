@@ -46,6 +46,8 @@ next-env.d.ts
 # AI-only local context (not for the public repo)
 /dev_log.md
 /CLAUDE.md
+/demo_invitado.md
+/plan_invitado.md
 
 # VPS infrastructure for Mavi's assistant. Local backup only: this repo is
 # public and these files disclose the server layout. The versioned copy lives

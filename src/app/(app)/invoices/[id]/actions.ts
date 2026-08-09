@@ -9,9 +9,20 @@ import {
   updateInvoice,
   deleteInvoice,
 } from "@/lib/data/invoices";
+import { requireOrg } from "@/lib/data/org";
 import type { CreateInvoicePayload, CreateResult } from "../new/actions";
 
 export type ActionState = { ok: boolean; error?: string };
+
+/**
+ * Every action here takes an invoice id straight from the browser, so the org
+ * has to come from the session instead. Passing it through means the DB refuses
+ * an id belonging to another business rather than acting on it.
+ */
+async function currentOrgId(): Promise<string> {
+  const { org } = await requireOrg();
+  return org.id;
+}
 
 async function refresh(id: string) {
   revalidatePath(`/invoices/${id}`);
@@ -25,7 +36,7 @@ export async function markPaidAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await markPaid(id);
+    await markPaid(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -36,7 +47,7 @@ export async function markPaidAction(
 /** Same as markPaidAction but called directly by id (history quick-action). */
 export async function markPaidByIdAction(id: string): Promise<ActionState> {
   try {
-    await markPaid(id);
+    await markPaid(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -50,7 +61,7 @@ export async function markUnpaidAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await markUnpaid(id);
+    await markUnpaid(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -61,7 +72,7 @@ export async function markUnpaidAction(
 /** Same as markUnpaidAction but called directly by id (history quick-action). */
 export async function markUnpaidByIdAction(id: string): Promise<ActionState> {
   try {
-    await markUnpaid(id);
+    await markUnpaid(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -75,7 +86,7 @@ export async function cancelInvoiceAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await cancelInvoice(id);
+    await cancelInvoice(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -88,7 +99,7 @@ export async function cancelInvoiceByIdAction(
   id: string,
 ): Promise<ActionState> {
   try {
-    await cancelInvoice(id);
+    await cancelInvoice(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -102,7 +113,7 @@ export async function reactivateInvoiceAction(
 ): Promise<ActionState> {
   const id = formData.get("id") as string;
   try {
-    await reactivateInvoice(id);
+    await reactivateInvoice(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -115,7 +126,7 @@ export async function reactivateInvoiceByIdAction(
   id: string,
 ): Promise<ActionState> {
   try {
-    await reactivateInvoice(id);
+    await reactivateInvoice(await currentOrgId(), id);
     await refresh(id);
     return { ok: true };
   } catch (e) {
@@ -148,7 +159,7 @@ export async function updateInvoiceAction(
   }
 
   try {
-    const inv = await updateInvoice(id, {
+    const inv = await updateInvoice(await currentOrgId(), id, {
       client_id: payload.client_id,
       issuer_id: payload.issuer_id,
       invoice_date: payload.invoice_date,
@@ -173,7 +184,7 @@ export async function updateInvoiceAction(
  */
 export async function deleteInvoiceAction(id: string): Promise<ActionState> {
   try {
-    await deleteInvoice(id);
+    await deleteInvoice(await currentOrgId(), id);
     revalidatePath("/history");
     revalidatePath("/");
     return { ok: true };

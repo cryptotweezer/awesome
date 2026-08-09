@@ -1,8 +1,7 @@
 import "server-only";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { Text, View, Image, StyleSheet } from "@react-pdf/renderer";
 import type { CompanyProfile } from "@/lib/types";
+import type { Logo } from "./logo";
 
 /**
  * Pieces every printed document shares: the letterhead, the bank-details
@@ -21,11 +20,20 @@ export function money(n: number | null | undefined): string {
   return `$${Number(n).toFixed(2)}`;
 }
 
-// Read once per server process. `public/logo_black.png` is kept in the trace
-// via `outputFileTracingIncludes` in next.config.ts so this works on Vercel too.
-export const logo = readFileSync(
-  path.join(process.cwd(), "public", "logo_black.png"),
-);
+/**
+ * The logo is passed in rather than read here, because each business prints its
+ * own and one that has not uploaded one prints none. See lib/pdf/logo.ts.
+ */
+export function LogoMark({ logo }: { logo: Logo | null }) {
+  // Without a logo the space is still reserved, so the letterhead does not
+  // reflow and every document keeps the same shape.
+  if (!logo) return <View style={base.logo} />;
+  return (
+    // react-pdf's Image, not an HTML img — alt text does not apply.
+    // eslint-disable-next-line jsx-a11y/alt-text
+    <Image style={base.logo} src={{ data: logo.data, format: logo.format }} />
+  );
+}
 
 export const base = StyleSheet.create({
   page: {
@@ -91,17 +99,20 @@ export function LetterHead({
   issuerName,
   issuerAbn,
   company,
+  logo,
+  taxIdLabel = "ABN",
 }: {
   issuerName: string;
   issuerAbn: string;
   company: CompanyProfile;
+  logo: Logo | null;
+  /** ABN, TFN or ACN, whichever this business registered. */
+  taxIdLabel?: string;
 }) {
   return (
     <>
       <View style={base.header}>
-        {/* react-pdf's Image, not an HTML img — alt text does not apply. */}
-        {/* eslint-disable-next-line jsx-a11y/alt-text */}
-        <Image style={base.logo} src={{ data: logo, format: "png" }} />
+        <LogoMark logo={logo} />
         <View style={base.issuer}>
           <Text style={base.issuerName}>{issuerName}</Text>
           <Text style={base.issuerLine}>{company.address_line}</Text>
@@ -111,7 +122,7 @@ export function LetterHead({
           <Text style={base.issuerLine}>E: {company.email}</Text>
           <Text style={base.issuerLine}>M: {company.phone}</Text>
           <Text style={base.issuerLine}>
-            ABN: <Text style={base.abn}>{issuerAbn}</Text>
+            {taxIdLabel}: <Text style={base.abn}>{issuerAbn}</Text>
           </Text>
         </View>
       </View>
@@ -125,13 +136,17 @@ export function LetterHead({
  * statement spans whichever ABNs their invoices happen to carry, so it shows
  * the business's own contact details instead of an individual issuer's.
  */
-export function CompanyLetterHead({ company }: { company: CompanyProfile }) {
+export function CompanyLetterHead({
+  company,
+  logo,
+}: {
+  company: CompanyProfile;
+  logo: Logo | null;
+}) {
   return (
     <>
       <View style={base.header}>
-        {/* react-pdf's Image, not an HTML img — alt text does not apply. */}
-        {/* eslint-disable-next-line jsx-a11y/alt-text */}
-        <Image style={base.logo} src={{ data: logo, format: "png" }} />
+        <LogoMark logo={logo} />
         <View style={base.issuer}>
           <Text style={base.issuerLine}>{company.address_line}</Text>
           <Text style={base.issuerLine}>

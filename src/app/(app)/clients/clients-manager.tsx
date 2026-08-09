@@ -155,20 +155,30 @@ function ClientDialog({
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="ABN (issuer)">
-              <select
+            {/* With one ABN there is nothing to choose: it is filled in for
+                them so every client still carries a default issuer. */}
+            {issuers.length === 1 ? (
+              <input
+                type="hidden"
                 name="default_issuer_id"
-                defaultValue={client?.default_issuer_id ?? ""}
-                className="input"
-              >
-                <option value="">— none —</option>
-                {issuers.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.short_name} ({i.abn})
-                  </option>
-                ))}
-              </select>
-            </Field>
+                value={issuers[0].id}
+              />
+            ) : (
+              <Field label="ABN (issuer)">
+                <select
+                  name="default_issuer_id"
+                  defaultValue={client?.default_issuer_id ?? ""}
+                  className="input"
+                >
+                  <option value="">— none —</option>
+                  {issuers.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.short_name} ({i.abn})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <Field label="Rate (AUD)">
               <input
                 name="default_rate"

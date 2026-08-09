@@ -1,9 +1,14 @@
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
+import { requireOrg } from "@/lib/data/org";
 import { ClientsManager } from "./clients-manager";
 
 export default async function ClientsPage() {
-  const [clients, issuers] = await Promise.all([listClients(), listIssuers()]);
+  const { org } = await requireOrg();
+  const [clients, issuers] = await Promise.all([
+    listClients(org.id),
+    listIssuers(org.id),
+  ]);
 
   return (
     <div className="space-y-6">

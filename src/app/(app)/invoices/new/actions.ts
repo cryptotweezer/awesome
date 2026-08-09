@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient as createAuthClient } from "@/lib/supabase/server";
-import { issuerNameFromEmail } from "@/lib/auth";
+import { requireOrg, signatureFor } from "@/lib/data/org";
 import { createInvoice } from "@/lib/data/invoices";
 
 export type CreateInvoicePayload = {
@@ -39,15 +38,13 @@ export async function createInvoiceAction(
     return { ok: false, error: "Add at least one line with a quantity." };
   }
 
-  // created_by = who is logged in (server-side, cannot be spoofed).
-  const supabase = await createAuthClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const createdBy = issuerNameFromEmail(user?.email);
+  // Both the organisation and the signature come from the session, server-side,
+  // so neither can be spoofed by the browser.
+  const { org, member } = await requireOrg();
+  const createdBy = signatureFor(member);
 
   try {
-    const invoice = await createInvoice({
+    const invoice = await createInvoice(org.id, {
       client_id: payload.client_id,
       issuer_id: payload.issuer_id,
       invoice_date: payload.invoice_date,

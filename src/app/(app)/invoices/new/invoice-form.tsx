@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { ClientWithIssuer, Issuer } from "@/lib/types";
-import { formatAUD, formatDate, todayInSydney } from "@/lib/format";
+import { formatAUD, formatDate } from "@/lib/format";
 
 export type InvoiceFormPayload = {
   client_id: string;
@@ -35,8 +35,6 @@ export type InvoiceFormInitial = {
   lines: Line[];
 };
 
-const today = todayInSydney();
-
 function emptyLine(serviceDate = ""): Line {
   return {
     description: "Cleaning Service",
@@ -55,12 +53,19 @@ function addDays(iso: string, days: number): string {
 export function InvoiceForm({
   clients,
   issuers,
+  today,
   action,
   initial = null,
   submitLabel = "Create invoice",
 }: {
   clients: ClientWithIssuer[];
   issuers: Issuer[];
+  /**
+   * Today in the business's time zone, resolved on the server. The browser's
+   * clock is not usable here: a laptop in Bogota would date a Sydney invoice a
+   * day early.
+   */
+  today: string;
   action: (payload: InvoiceFormPayload) => Promise<InvoiceFormResult>;
   initial?: InvoiceFormInitial | null;
   submitLabel?: string;
@@ -70,8 +75,15 @@ export function InvoiceForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  // A business with a single ABN never gets asked which one to bill under.
+  // Awesome has two (Mavi and Andres) and keeps the picker; everyone who signs
+  // up has exactly one, created during onboarding, so the question is noise.
+  const soleIssuer = issuers.length === 1 ? issuers[0] : null;
+
   const [clientId, setClientId] = useState(initial?.client_id ?? "");
-  const [issuerId, setIssuerId] = useState(initial?.issuer_id ?? "");
+  const [issuerId, setIssuerId] = useState(
+    initial?.issuer_id ?? soleIssuer?.id ?? "",
+  );
   const [invoiceDate, setInvoiceDate] = useState(
     initial?.invoice_date ?? today,
   );
@@ -84,7 +96,7 @@ export function InvoiceForm({
     setClientId(id);
     const c = clients.find((x) => x.id === id);
     if (!c) return;
-    setIssuerId(c.default_issuer_id ?? "");
+    setIssuerId(c.default_issuer_id ?? soleIssuer?.id ?? "");
     // In edit mode, don't wipe the line items the user is correcting.
     if (!isEdit) {
       setLines([
@@ -158,23 +170,37 @@ export function InvoiceForm({
           </select>
         </label>
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-            ABN (issuer) *
-          </span>
-          <select
-            value={issuerId}
-            onChange={(e) => setIssuerId(e.target.value)}
-            className="input"
-          >
-            <option value="">— select —</option>
-            {issuers.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.short_name} ({i.abn})
-              </option>
-            ))}
-          </select>
-        </label>
+        {soleIssuer ? (
+          <div className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Billing as
+            </span>
+            <p className="px-1 py-2 text-sm text-slate-700 dark:text-slate-300">
+              {soleIssuer.full_name}{" "}
+              <span className="text-slate-400 dark:text-slate-500">
+                ({soleIssuer.abn})
+              </span>
+            </p>
+          </div>
+        ) : (
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              ABN (issuer) *
+            </span>
+            <select
+              value={issuerId}
+              onChange={(e) => setIssuerId(e.target.value)}
+              className="input"
+            >
+              <option value="">— select —</option>
+              {issuers.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.short_name} ({i.abn})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">

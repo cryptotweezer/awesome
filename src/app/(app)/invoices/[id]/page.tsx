@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoice } from "@/lib/data/invoices";
+import { requireOrg } from "@/lib/data/org";
 import { formatAUD, formatDate } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 
@@ -17,7 +18,8 @@ export default async function InvoiceDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const inv = await getInvoice(id);
+  const { org } = await requireOrg();
+  const inv = await getInvoice(org.id, id);
   if (!inv) notFound();
 
   const billTo = [

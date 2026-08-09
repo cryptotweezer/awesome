@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { isGuestSignupEnabled } from "@/lib/auth";
 import { LoginButton } from "./login-button";
 import { ChatDemo } from "./chat-demo";
 
@@ -16,6 +17,7 @@ export default async function LoginPage({
 }) {
   const { error } = await searchParams;
   const message = error ? MESSAGES[error] : null;
+  const signupOpen = isGuestSignupEnabled();
 
   return (
     <>
@@ -87,6 +89,16 @@ export default async function LoginPage({
                 See it in action ↓
               </a>
             </div>
+
+            {/* Only promised when it is actually true. Signing up is opened by
+                the GUEST_SIGNUP environment variable, not by this deploy. */}
+            {signupOpen && (
+              <p className="mt-4 max-w-xl text-sm text-slate-500 dark:text-slate-400">
+                Sign in and set up your own business in a minute: your details,
+                your logo, your invoice numbers. Connect your own AI to it, and
+                take the whole system with you whenever you want.
+              </p>
+            )}
           </section>
 
           {/* The chat */}

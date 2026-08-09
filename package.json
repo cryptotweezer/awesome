@@ -6,13 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:db": "node --env-file=.env.local --test tests/onboarding.test.mjs tests/assistant-quota.test.mjs tests/purge.test.mjs",
+    "test:http": "node --env-file=../_backups_awesome/isolation-keys.env --test tests/isolation.test.mjs tests/gateway-surface.test.mjs tests/documents.test.mjs",
+    "test:seed": "node --env-file=.env.local scripts/seed-test-org.mjs",
+    "test:clean": "node --env-file=.env.local scripts/seed-test-org.mjs --cleanup",
+    "demo-orgs": "node --env-file=.env.local scripts/demo-orgs.mjs"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
     "@supabase/ssr": "^0.12.3",
     "@supabase/supabase-js": "^2.110.8",
     "exceljs": "^4.4.0",
+    "jszip": "^3.10.1",
     "next": "16.2.11",
     "react": "19.2.4",
     "react-dom": "19.2.4",

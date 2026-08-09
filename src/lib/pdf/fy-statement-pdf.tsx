@@ -1,6 +1,7 @@
 import "server-only";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { CompanyProfile } from "@/lib/types";
+import type { Logo } from "./logo";
 import type { FyStatement } from "@/lib/data/statements";
 import { formatDate } from "@/lib/format";
 import {
@@ -71,9 +72,13 @@ const s = StyleSheet.create({
 export function FyStatementDocument({
   statement,
   company,
+  logo,
+  taxIdLabel,
 }: {
   statement: FyStatement;
   company: CompanyProfile;
+  logo: Logo | null;
+  taxIdLabel?: string;
 }) {
   const { issuer } = statement;
 
@@ -87,6 +92,8 @@ export function FyStatementDocument({
           issuerName={issuer.full_name}
           issuerAbn={issuer.abn}
           company={company}
+          logo={logo}
+          taxIdLabel={taxIdLabel}
         />
 
         <View style={s.midRow}>

@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { listInvoices } from "@/lib/data/invoices";
+import { requireOrg } from "@/lib/data/org";
+import { todayInTimezone } from "@/lib/format";
 import { HistoryTable } from "./history-table";
 
 export default async function HistoryPage() {
-  const invoices = await listInvoices();
+  const { org } = await requireOrg();
+  const invoices = await listInvoices(org.id);
+  const today = todayInTimezone(org.timezone);
 
   return (
     <div className="space-y-6">
@@ -24,7 +28,7 @@ export default async function HistoryPage() {
         </Link>
       </div>
 
-      <HistoryTable invoices={invoices} />
+      <HistoryTable invoices={invoices} today={today} />
     </div>
   );
 }

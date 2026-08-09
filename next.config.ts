@@ -1,12 +1,20 @@
 import type { NextConfig } from "next";
 
+const LOGO = "./public/logo_black.png";
+
 const nextConfig: NextConfig = {
-  // The PDF route reads the logo off disk at render time — keep it in the
-  // serverless trace so it survives the Vercel build.
+  // These routes read files off disk at request time, so the files have to
+  // survive the Vercel build and land in the serverless bundle.
   outputFileTracingIncludes: {
-    "/invoices/[id]/pdf": ["./public/logo_black.png"],
-    "/statements/client/[clientId]/pdf": ["./public/logo_black.png"],
-    "/statements/fy/[issuerId]/pdf": ["./public/logo_black.png"],
+    // The built-in logo, used by the business that owns this deployment when
+    // it has not uploaded one to storage. See src/lib/pdf/logo.ts.
+    "/invoices/[id]/pdf": [LOGO],
+    "/statements/client/[clientId]/pdf": [LOGO],
+    "/statements/fy/[issuerId]/pdf": [LOGO],
+    "/api/agent/[tool]": [LOGO],
+    "/api/mcp": [LOGO],
+    // The installer handed to anyone who wants to run their own copy.
+    "/guide/schema.sql": ["./supabase/schema.sql"],
   },
 };
 

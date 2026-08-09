@@ -1,7 +1,9 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { getInvoiceByRef } from "@/lib/data/invoices";
 import { getCompanyProfile } from "@/lib/data/company";
+import { getCurrentOrg } from "@/lib/data/org";
 import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
+import { loadLogo } from "@/lib/pdf/logo";
 
 /**
  * Renders the invoice as a PDF on demand and streams it back. Nothing is
@@ -15,7 +17,9 @@ import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
  *   GET /invoices/:ref/pdf            -> downloads the file
  *   GET /invoices/:ref/pdf?inline=1   -> renders in the browser's PDF viewer
  *
- * Access is enforced by the proxy (session cookie, or the Hermes API key).
+ * The proxy checks that there IS a session; ownership is checked here, because
+ * a signed-in stranger asking for /invoices/1945/pdf must get a 404 rather than
+ * somebody else's invoice.
  */
 export async function GET(
   request: Request,
@@ -23,16 +27,24 @@ export async function GET(
 ) {
   const { id } = await ctx.params;
 
+  const session = await getCurrentOrg();
+  if (!session) return new Response("Invoice not found", { status: 404 });
+
   const [invoice, company] = await Promise.all([
-    getInvoiceByRef(id),
-    getCompanyProfile(),
+    getInvoiceByRef(session.org.id, id),
+    getCompanyProfile(session.org.id),
   ]);
   if (!invoice) {
     return new Response("Invoice not found", { status: 404 });
   }
 
   const buffer = await renderToBuffer(
-    <InvoiceDocument invoice={invoice} company={company} />,
+    <InvoiceDocument
+      invoice={invoice}
+      company={company}
+      logo={await loadLogo(session.org)}
+      taxIdLabel={session.org.tax_id_label}
+    />,
   );
 
   const slug = invoice.bill_to_name

@@ -1,6 +1,7 @@
 import "server-only";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { CompanyProfile, Invoice, InvoiceItem } from "@/lib/types";
+import type { Logo } from "./logo";
 import { formatDate } from "@/lib/format";
 import {
   INK,
@@ -77,9 +78,14 @@ export type InvoicePdfData = Invoice & { invoice_items: InvoiceItem[] };
 export function InvoiceDocument({
   invoice,
   company,
+  logo,
+  taxIdLabel,
 }: {
   invoice: InvoicePdfData;
   company: CompanyProfile;
+  /** This business's own logo, or null if it has not uploaded one. */
+  logo: Logo | null;
+  taxIdLabel?: string;
 }) {
   const billTo = [
     invoice.bill_to_address_line,
@@ -101,6 +107,8 @@ export function InvoiceDocument({
           issuerName={invoice.issuer_name}
           issuerAbn={invoice.issuer_abn}
           company={company}
+          logo={logo}
+          taxIdLabel={taxIdLabel}
         />
 
         <View style={s.midRow}>

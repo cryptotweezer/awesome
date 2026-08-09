@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
 import { getInvoice } from "@/lib/data/invoices";
+import { requireOrg } from "@/lib/data/org";
+import { todayInTimezone } from "@/lib/format";
 import { InvoiceForm } from "../../new/invoice-form";
 import { updateInvoiceAction } from "../actions";
 
@@ -12,10 +14,11 @@ export default async function EditInvoicePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const { org } = await requireOrg();
   const [inv, clients, issuers] = await Promise.all([
-    getInvoice(id),
-    listClients(),
-    listIssuers(),
+    getInvoice(org.id, id),
+    listClients(org.id),
+    listIssuers(org.id),
   ]);
   if (!inv) notFound();
 
@@ -55,6 +58,7 @@ export default async function EditInvoicePage({
       <InvoiceForm
         clients={clients}
         issuers={issuers}
+        today={todayInTimezone(org.timezone)}
         initial={initial}
         submitLabel="Save changes"
         action={updateInvoiceAction.bind(null, id)}

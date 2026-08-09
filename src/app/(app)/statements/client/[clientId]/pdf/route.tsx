@@ -1,7 +1,9 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { getClientStatement } from "@/lib/data/statements";
 import { getCompanyProfile } from "@/lib/data/company";
+import { getCurrentOrg } from "@/lib/data/org";
 import { ClientStatementDocument } from "@/lib/pdf/client-statement-pdf";
+import { loadLogo } from "@/lib/pdf/logo";
 
 /**
  * Payment-reminder statement for one client — every invoice they still owe,
@@ -17,16 +19,27 @@ export async function GET(
 ) {
   const { clientId } = await ctx.params;
 
+  // Ownership is checked here, not by the proxy: a client id from another
+  // business must read as "nothing outstanding", never as a statement.
+  const session = await getCurrentOrg();
+  if (!session) {
+    return new Response("Nothing outstanding for this client", { status: 404 });
+  }
+
   const [statement, company] = await Promise.all([
-    getClientStatement(clientId),
-    getCompanyProfile(),
+    getClientStatement(session.org, clientId),
+    getCompanyProfile(session.org.id),
   ]);
   if (!statement) {
     return new Response("Nothing outstanding for this client", { status: 404 });
   }
 
   const buffer = await renderToBuffer(
-    <ClientStatementDocument statement={statement} company={company} />,
+    <ClientStatementDocument
+      statement={statement}
+      company={company}
+      logo={await loadLogo(session.org)}
+    />,
   );
 
   const slug = statement.client.name

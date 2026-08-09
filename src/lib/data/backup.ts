@@ -1,11 +1,17 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { todayInSydney } from "@/lib/format";
+import { getOrg } from "@/lib/data/org";
+import { todayInTimezone } from "@/lib/format";
 
 /**
- * A complete, restorable snapshot of the business data, meant to live OFF this
- * database (downloaded, emailed, saved somewhere the user controls). Secrets are
- * excluded on purpose: agent_keys hold key hashes and never belong in a backup.
+ * A complete, restorable snapshot of ONE organisation's data, meant to live OFF
+ * this database (downloaded, emailed, saved somewhere the user controls).
+ *
+ * Two things are excluded on purpose: agent_keys, which hold key hashes and
+ * never belong in a backup, and anything belonging to another organisation.
+ * Before the multi-tenant migration this function did an unfiltered `select *`
+ * on five tables, which as a guest-facing tool would have handed the whole
+ * database to whoever asked.
  */
 export type Backup = {
   meta: {
@@ -15,8 +21,10 @@ export type Backup = {
     generated_at: string;
     /** Sydney calendar date, for the filename and human reading. */
     date: string;
+    org_id: string;
+    org_name: string;
   };
-  company_profile: unknown[];
+  org: unknown;
   issuers: unknown[];
   clients: unknown[];
   invoices: unknown[];
@@ -24,29 +32,36 @@ export type Backup = {
   counts: Record<string, number>;
 };
 
-export async function createBackup(): Promise<Backup> {
+export async function createBackup(orgId: string): Promise<Backup> {
   const supabase = createAdminClient();
 
-  const [company, issuers, clients, invoices, items] = await Promise.all([
-    supabase.from("company_profile").select("*"),
-    supabase.from("issuers").select("*").order("short_name"),
-    supabase.from("clients").select("*").order("name"),
-    supabase.from("invoices").select("*").order("invoice_number"),
-    supabase.from("invoice_items").select("*"),
+  const [org, issuers, clients, invoices, items] = await Promise.all([
+    getOrg(orgId),
+    supabase.from("issuers").select("*").eq("org_id", orgId).order("short_name"),
+    supabase.from("clients").select("*").eq("org_id", orgId).order("name"),
+    supabase
+      .from("invoices")
+      .select("*")
+      .eq("org_id", orgId)
+      .order("invoice_number"),
+    supabase.from("invoice_items").select("*").eq("org_id", orgId),
   ]);
 
-  for (const r of [company, issuers, clients, invoices, items]) {
+  for (const r of [issuers, clients, invoices, items]) {
     if (r.error) throw new Error(`Backup failed: ${r.error.message}`);
   }
+  if (!org) throw new Error(`Backup failed: organisation ${orgId} not found`);
 
   return {
     meta: {
       app: "awesome-billing",
-      version: 1,
+      version: 2,
       generated_at: new Date().toISOString(),
-      date: todayInSydney(),
+      date: todayInTimezone(org.timezone),
+      org_id: org.id,
+      org_name: org.name,
     },
-    company_profile: company.data ?? [],
+    org,
     issuers: issuers.data ?? [],
     clients: clients.data ?? [],
     invoices: invoices.data ?? [],

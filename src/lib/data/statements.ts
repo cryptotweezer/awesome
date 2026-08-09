@@ -1,12 +1,12 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { todayInSydney } from "@/lib/format";
+import { todayInTimezone } from "@/lib/format";
 import {
   financialYearStart,
   financialYearEnd,
   financialYearLabel,
 } from "@/lib/data/invoices";
-import type { Client, InvoiceStatus, Issuer } from "@/lib/types";
+import type { Client, InvoiceStatus, Issuer, Org } from "@/lib/types";
 
 /**
  * Statements are DERIVED documents — computed on the fly from live invoice
@@ -79,15 +79,18 @@ const UNPAID_SELECT =
   "id, invoice_number, invoice_date, due_date, balance_due, client_id, bill_to_name, invoice_items(description, service_date, quantity, amount, sort_order)";
 
 /** Every client with outstanding invoices — drives the picker. */
-export async function listStatementTargets(): Promise<StatementTarget[]> {
+export async function listStatementTargets(
+  org: Org,
+): Promise<StatementTarget[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
     .select(UNPAID_SELECT)
+    .eq("org_id", org.id)
     .eq("status", "unpaid");
   if (error) throw new Error(`Failed to load statements: ${error.message}`);
 
-  const today = todayInSydney();
+  const today = todayInTimezone(org.timezone);
   const byClient = new Map<string, StatementTarget>();
 
   for (const inv of (data ?? []) as unknown as UnpaidRow[]) {
@@ -123,15 +126,22 @@ export async function listStatementTargets(): Promise<StatementTarget[]> {
  * the longest-standing debt reads at the top.
  */
 export async function getClientStatement(
+  org: Org,
   clientId: string,
 ): Promise<ClientStatement | null> {
   const supabase = createAdminClient();
 
   const [{ data: client }, { data: rows, error }] = await Promise.all([
-    supabase.from("clients").select("*").eq("id", clientId).maybeSingle(),
+    supabase
+      .from("clients")
+      .select("*")
+      .eq("org_id", org.id)
+      .eq("id", clientId)
+      .maybeSingle(),
     supabase
       .from("invoices")
       .select(UNPAID_SELECT)
+      .eq("org_id", org.id)
       .eq("status", "unpaid")
       .eq("client_id", clientId)
       .order("invoice_number", { ascending: true }),
@@ -167,7 +177,7 @@ export async function getClientStatement(
 
   const c = client as Client;
   return {
-    statementDate: todayInSydney(),
+    statementDate: todayInTimezone(org.timezone),
     // Current client details — the statement is being sent today.
     client: {
       name: c.name,
@@ -223,18 +233,22 @@ export type FyStatement = {
  * Financial years that actually hold invoices, newest first. The current year
  * is always offered even when empty, so a fresh FY can still be printed.
  */
-export async function listFinancialYears(): Promise<FinancialYearOption[]> {
+export async function listFinancialYears(
+  org: Org,
+): Promise<FinancialYearOption[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("invoices")
-    .select("invoice_date");
+    .select("invoice_date")
+    .eq("org_id", org.id);
   if (error)
     throw new Error(`Failed to load financial years: ${error.message}`);
 
+  const month = org.fy_start_month;
   const counts = new Map<string, number>();
-  counts.set(financialYearStart(), 0);
+  counts.set(financialYearStart(todayInTimezone(org.timezone), month), 0);
   for (const r of (data ?? []) as { invoice_date: string }[]) {
-    const start = financialYearStart(r.invoice_date);
+    const start = financialYearStart(r.invoice_date, month);
     counts.set(start, (counts.get(start) ?? 0) + 1);
   }
 
@@ -251,6 +265,7 @@ export async function listFinancialYears(): Promise<FinancialYearOption[]> {
  * is missing from the sequence) but excluded from the total.
  */
 export async function getFyStatement(
+  org: Org,
   issuerId: string,
   fyStart: string,
 ): Promise<FyStatement | null> {
@@ -258,12 +273,18 @@ export async function getFyStatement(
   const fyEnd = financialYearEnd(fyStart);
 
   const [{ data: issuer }, { data: rows, error }] = await Promise.all([
-    supabase.from("issuers").select("*").eq("id", issuerId).maybeSingle(),
+    supabase
+      .from("issuers")
+      .select("*")
+      .eq("org_id", org.id)
+      .eq("id", issuerId)
+      .maybeSingle(),
     supabase
       .from("invoices")
       .select(
         "invoice_number, bill_to_name, bill_to_suburb, invoice_date, due_date, total, status, invoice_items(service_date)",
       )
+      .eq("org_id", org.id)
       .eq("issuer_id", issuerId)
       .gte("invoice_date", fyStart)
       .lte("invoice_date", fyEnd)
@@ -324,7 +345,7 @@ export async function getFyStatement(
     fyStart,
     fyEnd,
     fyLabel: financialYearLabel(fyStart),
-    generatedOn: todayInSydney(),
+    generatedOn: todayInTimezone(org.timezone),
     rows: statementRows,
     invoiceCount,
     cancelledCount,

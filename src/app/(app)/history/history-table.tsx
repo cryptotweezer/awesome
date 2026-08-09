@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InvoiceListRow } from "@/lib/data/invoices";
 import type { InvoiceStatus } from "@/lib/types";
-import { formatAUD, formatDate, todayInSydney } from "@/lib/format";
+import { formatAUD, formatDate } from "@/lib/format";
 import {
   markPaidByIdAction,
   markUnpaidByIdAction,
@@ -22,9 +22,7 @@ const STATUS_STYLES: Record<InvoiceStatus, string> = {
     "bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 };
 
-const today = todayInSydney();
-
-function isOverdue(inv: InvoiceListRow) {
+function isOverdue(inv: InvoiceListRow, today: string) {
   return inv.status === "unpaid" && inv.due_date < today;
 }
 
@@ -48,7 +46,15 @@ const SCOPE_STATUSES: Record<Scope, InvoiceStatus[]> = {
   both: ["unpaid", "paid", "cancelled"],
 };
 
-export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
+export function HistoryTable({
+  invoices,
+  today,
+}: {
+  invoices: InvoiceListRow[];
+  /** Today in the business's time zone, so overdue never depends on the
+   *  viewer's laptop clock. Resolved on the server. */
+  today: string;
+}) {
   const [scope, setScope] = useState<Scope>("both");
   const [client, setClient] = useState("all");
   const [status, setStatus] = useState("all");
@@ -208,6 +214,7 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
       <InvoiceTable
         title="To be paid"
         rows={outstanding}
+        today={today}
         filtered={filtered && inScope("outstanding")}
         empty={
           invoices.length === 0 ? (
@@ -229,6 +236,7 @@ export function HistoryTable({ invoices }: { invoices: InvoiceListRow[] }) {
       <InvoiceTable
         title="Paid & cancelled"
         rows={closed}
+        today={today}
         scrollable
         collapsible
         filtered={filtered && inScope("closed")}
@@ -272,6 +280,7 @@ const CLOSED_MAX_HEIGHT = "28rem"; // ≈ 10 rows + header
 function InvoiceTable({
   title,
   rows,
+  today,
   empty,
   scrollable = false,
   filtered = false,
@@ -279,6 +288,7 @@ function InvoiceTable({
 }: {
   title: string;
   rows: InvoiceListRow[];
+  today: string;
   empty: React.ReactNode;
   scrollable?: boolean;
   /** Marks the table the filter bar is currently acting on. */
@@ -384,7 +394,7 @@ function InvoiceTable({
               </tr>
             )}
             {rows.map((inv) => {
-              const overdue = isOverdue(inv);
+              const overdue = isOverdue(inv, today);
               return (
                 <tr
                   key={inv.id}

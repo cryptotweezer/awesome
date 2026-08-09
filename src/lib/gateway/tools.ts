@@ -1,6 +1,7 @@
 import "server-only";
 import type { Agent } from "./auth";
-import { todayInSydney } from "@/lib/format";
+import { todayInTimezone } from "@/lib/format";
+import { getOrg } from "@/lib/data/org";
 import {
   createInvoice,
   updateInvoice,
@@ -219,15 +220,28 @@ function items(input: ToolInput): NewInvoiceItem[] {
   });
 }
 
-/** Resolve id / invoice / invoice_number (UUID or number) to the invoice UUID. */
-async function resolveId(input: ToolInput): Promise<string> {
+/**
+ * Resolve id / invoice / invoice_number (UUID or number) to the invoice UUID,
+ * within the caller's organisation. An invoice belonging to anybody else reads
+ * as "not found", which is both the safe answer and the honest one.
+ */
+async function resolveId(orgId: string, input: ToolInput): Promise<string> {
   const ref = String(
     input.id ?? input.invoice ?? input.invoice_number ?? "",
   ).trim();
   if (!ref) throw new Error(`Missing invoice reference (id or invoice number)`);
-  const inv = await getInvoiceByRef(ref);
+  const inv = await getInvoiceByRef(orgId, ref);
   if (!inv) throw new Error(`Invoice ${ref} not found`);
   return inv.id;
+}
+
+/**
+ * Today, in the calling business's own time zone. An agent runs wherever it
+ * runs; the invoice date has to follow the business, not the server.
+ */
+async function orgToday(orgId: string): Promise<string> {
+  const org = await getOrg(orgId);
+  return todayInTimezone(org?.timezone ?? "Australia/Sydney");
 }
 
 function clientInput(input: ToolInput): ClientInput {
@@ -251,17 +265,19 @@ export const tools: Record<string, ToolDef> = {
     description:
       "The daily pulse in one call: outstanding + overdue, unpaid count, billed this month / this FY / all time, and paid all time.",
     schema: NO_ARGS,
-    handler: () => businessSnapshot(),
+    handler: (_input, ctx) => businessSnapshot(ctx.agent.orgId),
   },
   today: {
     description:
-      "Today's date in Australia/Sydney, plus the last 14 days with their weekday names. " +
-      "Use this to resolve what the user says (yesterday, last Wednesday, the 20th) into a " +
-      "YYYY-MM-DD date. Never work it out from your own clock: agents run on servers in " +
-      "other timezones and the business runs on Sydney time.",
+      "Today's date in the business's own timezone, plus the last 14 days with their weekday " +
+      "names. Use this to resolve what the user says (yesterday, last Wednesday, the 20th) into " +
+      "a YYYY-MM-DD date. Never work it out from your own clock: agents run on servers in other " +
+      "timezones and the business runs on its own.",
     schema: NO_ARGS,
-    handler: async () => {
-      const today = todayInSydney();
+    handler: async (_input, ctx) => {
+      const org = await getOrg(ctx.agent.orgId);
+      const timezone = org?.timezone ?? "Australia/Sydney";
+      const today = todayInTimezone(timezone);
       const [y, m, d] = today.split("-").map(Number);
       const base = Date.UTC(y, m - 1, d);
       const recent = Array.from({ length: 14 }, (_, i) => {
@@ -272,25 +288,26 @@ export const tools: Record<string, ToolDef> = {
           ...(i === 0 ? { is: "today" } : i === 1 ? { is: "yesterday" } : {}),
         };
       });
-      return { today, timezone: "Australia/Sydney", recent_days: recent };
+      return { today, timezone, recent_days: recent };
     },
   },
   who_owes: {
     description: "Every client with an unpaid balance: amount, count, overdue.",
     schema: NO_ARGS,
-    handler: () => whoOwes(),
+    handler: (_input, ctx) => whoOwes(ctx.agent.orgId),
   },
   overdue_invoices: {
     description:
       "Flat list of every overdue unpaid invoice: number, client, ABN, due date, days overdue, balance.",
     schema: NO_ARGS,
-    handler: () => overdueInvoices(),
+    handler: (_input, ctx) => overdueInvoices(ctx.agent.orgId),
   },
   client_summary: {
     description:
       "Per-client snapshot: billed all-time, paid, outstanding, unpaid/overdue counts, last invoice date. Args: client (name).",
     schema: objSchema({ client: CLIENT_REF_PROPS.client }, ["client"]),
-    handler: (input) => clientSummary(reqStr(input, "client")),
+    handler: (input, ctx) =>
+      clientSummary(ctx.agent.orgId, reqStr(input, "client")),
   },
   find_invoices: {
     description:
@@ -303,8 +320,8 @@ export const tools: Record<string, ToolDef> = {
       to: { ...DATE_FIELD, description: "Latest invoice_date." },
       limit: { type: "number", description: "Defaults to 20." },
     }),
-    handler: (input) =>
-      findInvoices({
+    handler: (input, ctx) =>
+      findInvoices(ctx.agent.orgId, {
         client: optStr(input, "client"),
         issuer: optStr(input, "issuer"),
         status: optStr(input, "status"),
@@ -316,7 +333,8 @@ export const tools: Record<string, ToolDef> = {
   client_account: {
     description: "A client's unpaid invoices with balances. Args: client (name).",
     schema: objSchema({ client: CLIENT_REF_PROPS.client }, ["client"]),
-    handler: (input) => clientAccount(reqStr(input, "client")),
+    handler: (input, ctx) =>
+      clientAccount(ctx.agent.orgId, reqStr(input, "client")),
   },
   recent_invoices: {
     description: "Latest invoices, optionally for one client. Args: client?, limit?.",
@@ -324,8 +342,12 @@ export const tools: Record<string, ToolDef> = {
       client: CLIENT_REF_PROPS.client,
       limit: { type: "number", description: "Defaults to 10." },
     }),
-    handler: (input) =>
-      recentInvoices(optStr(input, "client"), optNum(input, "limit")),
+    handler: (input, ctx) =>
+      recentInvoices(
+        ctx.agent.orgId,
+        optStr(input, "client"),
+        optNum(input, "limit"),
+      ),
   },
   billed_in_period: {
     description:
@@ -338,8 +360,13 @@ export const tools: Record<string, ToolDef> = {
       },
       ["from", "to"],
     ),
-    handler: (input) =>
-      billedInPeriod(reqStr(input, "from"), reqStr(input, "to"), optStr(input, "issuer")),
+    handler: (input, ctx) =>
+      billedInPeriod(
+        ctx.agent.orgId,
+        reqStr(input, "from"),
+        reqStr(input, "to"),
+        optStr(input, "issuer"),
+      ),
   },
   fy_summary: {
     description:
@@ -350,24 +377,26 @@ export const tools: Record<string, ToolDef> = {
         description: "Start of the AU financial year, always YYYY-07-01.",
       },
     }),
-    handler: (input) => fySummary(optStr(input, "fy_start")),
+    handler: (input, ctx) =>
+      fySummary(ctx.agent.orgId, optStr(input, "fy_start")),
   },
   get_invoice: {
     description: "One invoice with its line items. Args: invoice (number or UUID).",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => getInvoiceByRef(await refString(input)),
+    handler: async (input, ctx) =>
+      getInvoiceByRef(ctx.agent.orgId, await refString(input)),
   },
   list_clients: {
     description: "All clients with their details (incl. internal email).",
     schema: NO_ARGS,
-    handler: () => listClients(),
+    handler: (_input, ctx) => listClients(ctx.agent.orgId),
   },
   create_backup: {
     description:
       "A full backup of the business (clients, issuers, invoices, line items, company profile) as a JSON file in base64, for safe-keeping off the database. Args: none. Returns filename, counts and json_base64.",
     schema: NO_ARGS,
-    handler: async () => {
-      const backup = await createBackup();
+    handler: async (_input, ctx) => {
+      const backup = await createBackup(ctx.agent.orgId);
       const json = JSON.stringify(backup);
       return {
         filename: `awesome-backup-${backup.meta.date}.json`,
@@ -382,18 +411,19 @@ export const tools: Record<string, ToolDef> = {
   get_invoice_pdf: {
     description: "The invoice PDF as base64. Args: invoice (number or UUID).",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => renderInvoicePdf(await refString(input)),
+    handler: async (input, ctx) =>
+      renderInvoicePdf(ctx.agent.orgId, await refString(input)),
   },
   get_client_statement: {
     description:
       "A client's outstanding-payment statement PDF (base64). Args: client (name) or client_id.",
     schema: objSchema({ ...CLIENT_REF_PROPS }),
-    handler: async (input) => {
-      const c = await resolveClient({
+    handler: async (input, ctx) => {
+      const c = await resolveClient(ctx.agent.orgId, {
         client: optStr(input, "client"),
         client_id: optStr(input, "client_id"),
       });
-      return renderClientStatementPdf(c.id);
+      return renderClientStatementPdf(ctx.agent.orgId, c.id);
     },
   },
   get_tax_statement: {
@@ -404,12 +434,16 @@ export const tools: Record<string, ToolDef> = {
       issuer_id: { type: "string", description: "Issuer UUID." },
       fy_start: { ...DATE_FIELD, description: "Always YYYY-07-01. Defaults to the current FY." },
     }),
-    handler: async (input) => {
-      const iss = await resolveIssuer({
+    handler: async (input, ctx) => {
+      const iss = await resolveIssuer(ctx.agent.orgId, {
         issuer: optStr(input, "issuer"),
         issuer_id: optStr(input, "issuer_id"),
       });
-      return renderTaxStatementPdf(iss.id, optStr(input, "fy_start"));
+      return renderTaxStatementPdf(
+        ctx.agent.orgId,
+        iss.id,
+        optStr(input, "fy_start"),
+      );
     },
   },
   prepare_client_email: {
@@ -424,8 +458,8 @@ export const tools: Record<string, ToolDef> = {
           "Invoice numbers to attach. Omit for every unpaid one. Numbers that do not belong to this client are rejected.",
       },
     }),
-    handler: (input) =>
-      prepareClientEmail({
+    handler: (input, ctx) =>
+      prepareClientEmail(ctx.agent.orgId, {
         client: optStr(input, "client"),
         client_id: optStr(input, "client_id"),
         invoices: Array.isArray(input.invoices)
@@ -437,8 +471,8 @@ export const tools: Record<string, ToolDef> = {
     description:
       "Recipient + filled template + that client's account-statement PDF (base64) to email a client. Args: client (name) or client_id. Recipient and statement are always the same client, so they can't be crossed.",
     schema: objSchema({ ...CLIENT_REF_PROPS }),
-    handler: (input) =>
-      prepareClientStatementEmail({
+    handler: (input, ctx) =>
+      prepareClientStatementEmail(ctx.agent.orgId, {
         client: optStr(input, "client"),
         client_id: optStr(input, "client_id"),
       }),
@@ -472,11 +506,12 @@ export const tools: Record<string, ToolDef> = {
         },
       },
     },
-    handler: (input, ctx) =>
-      createInvoice({
+    handler: async (input, ctx) =>
+      createInvoice(ctx.agent.orgId, {
         client_id: reqStr(input, "client_id"),
         issuer_id: reqStr(input, "issuer_id"),
-        invoice_date: optStr(input, "invoice_date") ?? todayInSydney(),
+        invoice_date:
+          optStr(input, "invoice_date") ?? (await orgToday(ctx.agent.orgId)),
         internal_notes: optStr(input, "internal_notes"),
         created_by: ctx.agent.label,
         items: items(input),
@@ -502,11 +537,12 @@ export const tools: Record<string, ToolDef> = {
         internal_notes: { type: "string" },
       },
     },
-    handler: async (input) =>
-      updateInvoice(await resolveId(input), {
+    handler: async (input, ctx) =>
+      updateInvoice(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input), {
         client_id: reqStr(input, "client_id"),
         issuer_id: reqStr(input, "issuer_id"),
-        invoice_date: optStr(input, "invoice_date") ?? todayInSydney(),
+        invoice_date:
+          optStr(input, "invoice_date") ?? (await orgToday(ctx.agent.orgId)),
         internal_notes: optStr(input, "internal_notes"),
         items: items(input),
       }),
@@ -514,23 +550,30 @@ export const tools: Record<string, ToolDef> = {
   mark_paid: {
     description: "Mark an invoice paid in full. Args: invoice. There are no partial payments.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => markPaid(await resolveId(input)),
+    handler: async (input, ctx) =>
+      markPaid(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
   },
   mark_unpaid: {
     description: "Undo a payment. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => markUnpaid(await resolveId(input)),
+    handler: async (input, ctx) =>
+      markUnpaid(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
   },
   cancel_invoice: {
     description:
       "Cancel an invoice (keeps the record and its number). Prefer this over deleting one that was already sent. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => cancelInvoice(await resolveId(input)),
+    handler: async (input, ctx) =>
+      cancelInvoice(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
   },
   reactivate_invoice: {
     description: "Undo a cancellation. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input) => reactivateInvoice(await resolveId(input)),
+    handler: async (input, ctx) =>
+      reactivateInvoice(
+        ctx.agent.orgId,
+        await resolveId(ctx.agent.orgId, input),
+      ),
   },
   delete_invoice: {
     description:
@@ -546,13 +589,16 @@ export const tools: Record<string, ToolDef> = {
       },
       ["invoice", "confirm"],
     ),
-    handler: async (input) => {
+    handler: async (input, ctx) => {
       if (input.confirm !== true) {
         throw new Error(
           "delete_invoice needs confirm:true — confirm with the user first",
         );
       }
-      await deleteInvoice(await resolveId(input));
+      await deleteInvoice(
+        ctx.agent.orgId,
+        await resolveId(ctx.agent.orgId, input),
+      );
       return { deleted: true };
     },
   },
@@ -563,7 +609,7 @@ export const tools: Record<string, ToolDef> = {
       { name: { type: "string" }, ...CLIENT_FIELDS },
       ["name"],
     ),
-    handler: (input) => createClient(clientInput(input)),
+    handler: (input, ctx) => createClient(ctx.agent.orgId, clientInput(input)),
   },
   update_client: {
     description:
@@ -576,7 +622,7 @@ export const tools: Record<string, ToolDef> = {
       },
       ["id"],
     ),
-    handler: (input) => {
+    handler: (input, ctx) => {
       const id = reqStr(input, "id");
       const patch: Partial<ClientInput> = {};
       if ("name" in input) patch.name = reqStr(input, "name");
@@ -590,7 +636,7 @@ export const tools: Record<string, ToolDef> = {
       if ("default_description" in input)
         patch.default_description = reqStr(input, "default_description");
       if ("default_rate" in input) patch.default_rate = optNum(input, "default_rate");
-      return updateClient(id, patch);
+      return updateClient(ctx.agent.orgId, id, patch);
     },
   },
 };

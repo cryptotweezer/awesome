@@ -1,14 +1,17 @@
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
 import { getNextInvoiceNumber } from "@/lib/data/invoices";
+import { requireOrg } from "@/lib/data/org";
+import { todayInTimezone } from "@/lib/format";
 import { InvoiceForm } from "./invoice-form";
 import { createInvoiceAction } from "./actions";
 
 export default async function NewInvoicePage() {
+  const { org } = await requireOrg();
   const [clients, issuers, nextNumber] = await Promise.all([
-    listClients(),
-    listIssuers(),
-    getNextInvoiceNumber(),
+    listClients(org.id),
+    listIssuers(org.id),
+    getNextInvoiceNumber(org.id),
   ]);
 
   return (
@@ -40,6 +43,7 @@ export default async function NewInvoicePage() {
       <InvoiceForm
         clients={clients}
         issuers={issuers}
+        today={todayInTimezone(org.timezone)}
         action={createInvoiceAction}
       />
     </div>

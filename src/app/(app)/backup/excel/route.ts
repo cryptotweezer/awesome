@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { createBackup } from "@/lib/data/backup";
+import { getCurrentOrg } from "@/lib/data/org";
 
 /**
  * Human-readable backup: one Excel workbook, a sheet per table. This is for
@@ -37,7 +38,10 @@ function addSheet(wb: ExcelJS.Workbook, name: string, rows: Row[]) {
 }
 
 export async function GET() {
-  const backup = await createBackup();
+  const session = await getCurrentOrg();
+  if (!session) return new Response("Not found", { status: 404 });
+
+  const backup = await createBackup(session.org.id);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "awesome-billing";
@@ -46,7 +50,7 @@ export async function GET() {
   addSheet(wb, "Line Items", backup.invoice_items as Row[]);
   addSheet(wb, "Clients", backup.clients as Row[]);
   addSheet(wb, "ABNs", backup.issuers as Row[]);
-  addSheet(wb, "Company", backup.company_profile as Row[]);
+  addSheet(wb, "Business", [backup.org as Row]);
 
   const buffer = await wb.xlsx.writeBuffer();
   const filename = `awesome-backup-${backup.meta.date}.xlsx`;

@@ -3,7 +3,10 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getInvoiceByRef, financialYearStart } from "@/lib/data/invoices";
 import { getClientStatement, getFyStatement } from "@/lib/data/statements";
-import { getCompanyProfile } from "@/lib/data/company";
+import { companyProfileFromOrg } from "@/lib/data/company";
+import { getOrg } from "@/lib/data/org";
+import { loadLogo } from "@/lib/pdf/logo";
+import { todayInTimezone } from "@/lib/format";
 import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
 import { ClientStatementDocument } from "@/lib/pdf/client-statement-pdf";
 import { FyStatementDocument } from "@/lib/pdf/fy-statement-pdf";
@@ -28,16 +31,24 @@ export function formatInvoiceList(numbers: number[]): string {
 
 // -- resolvers --------------------------------------------------------------
 
-/** Resolve a client by id or a loose name match. Throws if none / ambiguous. */
-export async function resolveClient(input: {
-  client_id?: string | null;
-  client?: string | null;
-}): Promise<Client> {
+/**
+ * Resolve a client by id or a loose name match, inside one organisation.
+ * Throws if none / ambiguous. The org filter is not optional: without it, a
+ * one-letter name match would list somebody else's customers back to the agent.
+ */
+export async function resolveClient(
+  orgId: string,
+  input: {
+    client_id?: string | null;
+    client?: string | null;
+  },
+): Promise<Client> {
   const supabase = createAdminClient();
   if (input.client_id) {
     const { data } = await supabase
       .from("clients")
       .select("*")
+      .eq("org_id", orgId)
       .eq("id", input.client_id)
       .maybeSingle();
     if (!data) throw new Error(`Client ${input.client_id} not found`);
@@ -48,6 +59,7 @@ export async function resolveClient(input: {
   const { data } = await supabase
     .from("clients")
     .select("*")
+    .eq("org_id", orgId)
     .ilike("name", `%${name}%`)
     .order("name");
   const rows = (data ?? []) as Client[];
@@ -63,16 +75,20 @@ export async function resolveClient(input: {
   return rows[0];
 }
 
-/** Resolve an issuer (ABN) by id or short/full name. */
-export async function resolveIssuer(input: {
-  issuer_id?: string | null;
-  issuer?: string | null;
-}): Promise<Issuer> {
+/** Resolve an issuer (ABN) by id or short/full name, inside one organisation. */
+export async function resolveIssuer(
+  orgId: string,
+  input: {
+    issuer_id?: string | null;
+    issuer?: string | null;
+  },
+): Promise<Issuer> {
   const supabase = createAdminClient();
   if (input.issuer_id) {
     const { data } = await supabase
       .from("issuers")
       .select("*")
+      .eq("org_id", orgId)
       .eq("id", input.issuer_id)
       .maybeSingle();
     if (!data) throw new Error(`Issuer ${input.issuer_id} not found`);
@@ -83,6 +99,7 @@ export async function resolveIssuer(input: {
   const { data } = await supabase
     .from("issuers")
     .select("*")
+    .eq("org_id", orgId)
     .or(`short_name.ilike.%${name}%,full_name.ilike.%${name}%`);
   const rows = (data ?? []) as Issuer[];
   if (rows.length === 0) throw new Error(`No ABN matches "${name}"`);
@@ -100,14 +117,30 @@ export async function resolveIssuer(input: {
 
 // -- PDF renderers ----------------------------------------------------------
 
-export async function renderInvoicePdf(ref: string): Promise<Pdf> {
-  const [invoice, company] = await Promise.all([
-    getInvoiceByRef(ref),
-    getCompanyProfile(),
+/** The business behind an agent key, loaded once per document. */
+async function loadOrg(orgId: string) {
+  const org = await getOrg(orgId);
+  if (!org) throw new Error(`Organisation ${orgId} not found`);
+  return org;
+}
+
+export async function renderInvoicePdf(
+  orgId: string,
+  ref: string,
+): Promise<Pdf> {
+  const [invoice, org] = await Promise.all([
+    getInvoiceByRef(orgId, ref),
+    loadOrg(orgId),
   ]);
+  const company = companyProfileFromOrg(org);
   if (!invoice) throw new Error(`Invoice ${ref} not found`);
   const buffer = await renderToBuffer(
-    <InvoiceDocument invoice={invoice} company={company} />,
+    <InvoiceDocument
+      invoice={invoice}
+      company={company}
+      logo={await loadLogo(org)}
+      taxIdLabel={org.tax_id_label}
+    />,
   );
   return {
     filename: `Invoice-${invoice.invoice_number}-${slug(invoice.bill_to_name)}.pdf`,
@@ -116,15 +149,19 @@ export async function renderInvoicePdf(ref: string): Promise<Pdf> {
 }
 
 export async function renderClientStatementPdf(
+  orgId: string,
   clientId: string,
 ): Promise<Pdf> {
-  const [statement, company] = await Promise.all([
-    getClientStatement(clientId),
-    getCompanyProfile(),
-  ]);
+  const org = await loadOrg(orgId);
+  const statement = await getClientStatement(org, clientId);
+  const company = companyProfileFromOrg(org);
   if (!statement) throw new Error(`Nothing outstanding for that client`);
   const buffer = await renderToBuffer(
-    <ClientStatementDocument statement={statement} company={company} />,
+    <ClientStatementDocument
+      statement={statement}
+      company={company}
+      logo={await loadLogo(org)}
+    />,
   );
   return {
     filename: `Statement-${slug(statement.client.name)}-${statement.statementDate}.pdf`,
@@ -133,17 +170,24 @@ export async function renderClientStatementPdf(
 }
 
 export async function renderTaxStatementPdf(
+  orgId: string,
   issuerId: string,
   fyStart?: string | null,
 ): Promise<Pdf> {
-  const start = fyStart || financialYearStart();
-  const [statement, company] = await Promise.all([
-    getFyStatement(issuerId, start),
-    getCompanyProfile(),
-  ]);
+  const org = await loadOrg(orgId);
+  const start =
+    fyStart ||
+    financialYearStart(todayInTimezone(org.timezone), org.fy_start_month);
+  const statement = await getFyStatement(org, issuerId, start);
+  const company = companyProfileFromOrg(org);
   if (!statement) throw new Error(`ABN not found`);
   const buffer = await renderToBuffer(
-    <FyStatementDocument statement={statement} company={company} />,
+    <FyStatementDocument
+      statement={statement}
+      company={company}
+      logo={await loadLogo(org)}
+      taxIdLabel={org.tax_id_label}
+    />,
   );
   return {
     filename: `Invoices-${statement.fyLabel.replace(/\s/g, "-")}-${statement.issuer.short_name}.pdf`,
@@ -168,22 +212,28 @@ export type ClientEmail = {
  * the filled template, and the PDF attachments. The agent sends it with its own
  * Gmail. `invoices` picks specific numbers; omitted = every unpaid invoice.
  */
-export async function prepareClientEmail(input: {
-  client_id?: string | null;
-  client?: string | null;
-  invoices?: number[] | null;
-}): Promise<ClientEmail> {
-  const client = await resolveClient(input);
+export async function prepareClientEmail(
+  orgId: string,
+  input: {
+    client_id?: string | null;
+    client?: string | null;
+    invoices?: number[] | null;
+  },
+): Promise<ClientEmail> {
+  const client = await resolveClient(orgId, input);
   const supabase = createAdminClient();
 
   let numbers: number[];
   if (Array.isArray(input.invoices) && input.invoices.length > 0) {
     numbers = input.invoices.map(Number).filter((n) => !Number.isNaN(n));
     // Safety: explicit numbers must all belong to this client, so an agent can
-    // never attach one client's invoice to another client's email.
+    // never attach one client's invoice to another client's email. The org
+    // filter matters as much as the client one now that invoice numbers repeat
+    // across businesses: without it, #1 could resolve to a stranger's invoice.
     const { data } = await supabase
       .from("invoices")
       .select("invoice_number, client_id")
+      .eq("org_id", orgId)
       .in("invoice_number", numbers);
     const found = (data ?? []) as { invoice_number: number; client_id: string | null }[];
     const missing = numbers.filter(
@@ -204,6 +254,7 @@ export async function prepareClientEmail(input: {
     const { data } = await supabase
       .from("invoices")
       .select("invoice_number")
+      .eq("org_id", orgId)
       .eq("client_id", client.id)
       .eq("status", "unpaid")
       .order("invoice_number", { ascending: true });
@@ -215,7 +266,7 @@ export async function prepareClientEmail(input: {
     throw new Error(`No invoices to send for ${client.name}`);
   }
 
-  const company = await getCompanyProfile();
+  const company = companyProfileFromOrg(await loadOrg(orgId));
   const invoiceList = formatInvoiceList(numbers);
   const fill = (t: string) =>
     t
@@ -224,7 +275,7 @@ export async function prepareClientEmail(input: {
       .replaceAll("{business_name}", company.business_name);
 
   const attachments = await Promise.all(
-    numbers.map((n) => renderInvoicePdf(String(n))),
+    numbers.map((n) => renderInvoicePdf(orgId, String(n))),
   );
 
   return {
@@ -252,13 +303,16 @@ export type ClientStatementEmail = {
  * client is resolved once; the recipient is THAT client's email and the PDF is
  * THAT client's statement, so a statement can never reach the wrong client.
  */
-export async function prepareClientStatementEmail(input: {
-  client_id?: string | null;
-  client?: string | null;
-}): Promise<ClientStatementEmail> {
-  const client = await resolveClient(input);
-  const statement = await renderClientStatementPdf(client.id);
-  const company = await getCompanyProfile();
+export async function prepareClientStatementEmail(
+  orgId: string,
+  input: {
+    client_id?: string | null;
+    client?: string | null;
+  },
+): Promise<ClientStatementEmail> {
+  const client = await resolveClient(orgId, input);
+  const statement = await renderClientStatementPdf(orgId, client.id);
+  const company = companyProfileFromOrg(await loadOrg(orgId));
 
   const fill = (t: string) =>
     t

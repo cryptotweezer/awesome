@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/invoices/new", label: "New Invoice" },
   { href: "/clients", label: "Clients" },
   { href: "/statements", label: "Statements" },
+  { href: "/assistant", label: "Assistant" },
 ];
 
 export function NavLinks() {

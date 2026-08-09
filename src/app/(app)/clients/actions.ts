@@ -7,6 +7,7 @@ import {
   deleteClient,
   type ClientInput,
 } from "@/lib/data/clients";
+import { requireOrg } from "@/lib/data/org";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -43,10 +44,11 @@ export async function saveClientAction(
   };
 
   try {
+    const { org } = await requireOrg();
     if (id) {
-      await updateClient(id, input);
+      await updateClient(org.id, id, input);
     } else {
-      await createClient(input);
+      await createClient(org.id, input);
     }
   } catch (e) {
     return {
@@ -67,7 +69,8 @@ export async function deleteClientAction(
   const id = str(formData, "id");
   if (!id) return { ok: false, error: "Missing client id." };
   try {
-    await deleteClient(id);
+    const { org } = await requireOrg();
+    await deleteClient(org.id, id);
   } catch (e) {
     return {
       ok: false,
