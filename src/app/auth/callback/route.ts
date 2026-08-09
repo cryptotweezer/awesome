@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail, isGuestSignupEnabled } from "@/lib/auth";
 import { getCurrentOrg, touchOrgActivity } from "@/lib/data/org";
+import { protectAuth } from "@/lib/security/arcjet";
 
 /**
  * Google OAuth callback. Exchanges the code for a session, then decides where
@@ -13,6 +14,14 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
+
+  // The one door open to the whole internet once signups are enabled. Shield
+  // and a per-address ceiling only: no bot detection, because a false positive
+  // here means a real person cannot sign in at all.
+  const guard = await protectAuth(request);
+  if (!guard.ok) {
+    return NextResponse.redirect(`${origin}/login?error=blocked`);
+  }
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=auth`);

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authenticateAgent } from "@/lib/gateway/auth";
 import { tools } from "@/lib/gateway/tools";
+import { protectGateway } from "@/lib/security/arcjet";
 
 /**
  * REST gateway. Every agent capability is POST /api/agent/<tool> with a JSON
@@ -18,6 +19,11 @@ export async function POST(
 ) {
   const agent = await authenticateAgent(request);
   if (!agent) return json({ ok: false, error: "Unauthorized" }, 401);
+
+  // Rate limited per key, after authentication, so one agent's runaway loop
+  // cannot spend another agent's budget.
+  const guard = await protectGateway(request, agent.id);
+  if (!guard.ok) return json({ ok: false, error: guard.reason }, guard.status);
 
   const { tool } = await ctx.params;
   const def = tools[tool];

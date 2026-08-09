@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authenticateAgent, type Agent } from "@/lib/gateway/auth";
 import { tools } from "@/lib/gateway/tools";
+import { protectGateway } from "@/lib/security/arcjet";
 
 /**
  * MCP endpoint (stateless Streamable HTTP). Exposes the same gateway tools as
@@ -26,6 +27,11 @@ export async function POST(request: NextRequest) {
   if (!agent) {
     return json({ error: "Unauthorized" }, 401);
   }
+
+  // Rate limited per key, after authentication. Note there is no bot detection
+  // here: the callers are bots by design, that is the whole product.
+  const guard = await protectGateway(request, agent.id);
+  if (!guard.ok) return json({ error: guard.reason }, guard.status);
 
   let payload: unknown;
   try {

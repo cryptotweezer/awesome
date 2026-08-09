@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentOrg, signatureFor } from "@/lib/data/org";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runAssistant, type ChatMessage } from "@/lib/chat/assistant";
+import { protectAssistant } from "@/lib/security/arcjet";
 
 /**
  * The dashboard assistant.
@@ -20,6 +21,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
   const { org, member } = session;
+
+  // A ceiling on hammering, keyed on the business. The real limit is the
+  // message allowance below, which is counted in the database.
+  const guard = await protectAssistant(request, org.id);
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.reason }, { status: guard.status });
+  }
 
   let body: unknown;
   try {

@@ -8,6 +8,7 @@ const MESSAGES: Record<string, string> = {
   unauthorized:
     "That Google account is not authorised for Awesome Services billing.",
   auth: "Something went wrong while signing in. Please try again.",
+  blocked: "Too many sign-in attempts from here. Wait a minute and try again.",
 };
 
 export default async function LoginPage({
