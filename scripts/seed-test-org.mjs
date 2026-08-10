@@ -145,7 +145,9 @@ if (!count) {
     p_issuer_id: issuerId,
     p_invoice_date: new Date().toISOString().slice(0, 10),
     p_created_by: "SeedScript",
-    p_items: [{ rate: 50, quantity: 2, service_date: "2026-08-01" }],
+    p_items: [
+      { rate: 50, quantity: 2, service_date: "2026-08-01", description: "Work" },
+    ],
     p_internal_notes: null,
     p_org_id: TEST_ORG_ID,
   });

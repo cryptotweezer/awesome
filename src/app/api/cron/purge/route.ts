@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Delete trial businesses that have gone quiet for 30 days.
+ * Delete trial businesses a month after they were created, used or not.
  *
  *   GET /api/cron/purge
  *   Authorization: Bearer $CRON_SECRET
@@ -43,14 +43,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const purged = (data ?? []) as { purged_org_id: string }[];
+  const purged = (data ?? []) as {
+    purged_org_id: string;
+    purged_logo_path: string | null;
+  }[];
 
   // Best effort: a leftover logo costs a few kilobytes, a failed purge costs a
-  // database, so this never fails the request.
-  for (const org of purged) {
+  // database, so this never fails the request. The path comes back with the
+  // deleted row, since by now there is nothing left to look it up in.
+  const logos = purged
+    .map((org) => org.purged_logo_path)
+    .filter((path): path is string => !!path);
+  if (logos.length > 0) {
     await supabase.storage
       .from("org-logos")
-      .remove([`${org.purged_org_id}/logo.png`, `${org.purged_org_id}/logo.jpg`])
+      .remove(logos)
       .catch(() => undefined);
   }
 

@@ -35,9 +35,9 @@ export type InvoiceFormInitial = {
   lines: Line[];
 };
 
-function emptyLine(serviceDate = ""): Line {
+function emptyLine(serviceDate = "", description = ""): Line {
   return {
-    description: "Cleaning Service",
+    description,
     service_date: serviceDate,
     quantity: "1",
     rate: "",
@@ -54,6 +54,9 @@ export function InvoiceForm({
   clients,
   issuers,
   today,
+  termsDays,
+  gstRate = 0,
+  defaultDescription = "",
   action,
   initial = null,
   submitLabel = "Create invoice",
@@ -66,6 +69,19 @@ export function InvoiceForm({
    * day early.
    */
   today: string;
+  /** The business's payment window, so the preview says what will be saved. */
+  termsDays: number;
+  /**
+   * 0.10 for a business registered for GST, 0 otherwise. Prices include it, so
+   * this only changes what the preview says is inside the total.
+   */
+  gstRate?: number;
+  /**
+   * What this business always sells, if it always sells the same thing.
+   * Awesome fills every line with "Cleaning Service"; a business that does
+   * something different each time leaves this empty and types it per line.
+   */
+  defaultDescription?: string;
   action: (payload: InvoiceFormPayload) => Promise<InvoiceFormResult>;
   initial?: InvoiceFormInitial | null;
   submitLabel?: string;
@@ -89,7 +105,7 @@ export function InvoiceForm({
   );
   const [notes, setNotes] = useState(initial?.internal_notes ?? "");
   const [lines, setLines] = useState<Line[]>(
-    initial?.lines?.length ? initial.lines : [emptyLine()],
+    initial?.lines?.length ? initial.lines : [emptyLine("", defaultDescription)],
   );
 
   function onClientChange(id: string) {
@@ -101,7 +117,7 @@ export function InvoiceForm({
     if (!isEdit) {
       setLines([
         {
-          description: c.default_description || "Cleaning Service",
+          description: c.default_description || defaultDescription,
           service_date: "",
           quantity: "1",
           rate: c.default_rate != null ? String(c.default_rate) : "",
@@ -219,7 +235,7 @@ export function InvoiceForm({
             Terms / Due date
           </span>
           <p className="rounded-lg bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm text-slate-600 dark:text-slate-400">
-            NET7 · due {formatDate(addDays(invoiceDate, 7))}
+            NET{termsDays} · due {formatDate(addDays(invoiceDate, termsDays))}
           </p>
         </div>
       </div>
@@ -233,7 +249,10 @@ export function InvoiceForm({
           <button
             type="button"
             onClick={() =>
-              setLines((p) => [...p, emptyLine(p[0]?.service_date ?? "")])
+              setLines((p) => [
+                ...p,
+                emptyLine(p[0]?.service_date ?? "", defaultDescription),
+              ])
             }
             className="rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
           >
@@ -255,7 +274,10 @@ export function InvoiceForm({
               <input
                 value={l.description}
                 onChange={(e) => updateLine(i, "description", e.target.value)}
-                placeholder="Cleaning Service"
+                placeholder={defaultDescription || "What you did"}
+                // Without a business-wide default there is nothing to fall back
+                // to, so an empty line would come back as a database error.
+                required={!defaultDescription}
                 className="input col-span-12 sm:col-span-5"
               />
               <input
@@ -306,6 +328,13 @@ export function InvoiceForm({
             <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
               {formatAUD(total)}
             </p>
+            {/* Prices include GST, so this says what is inside the number
+                rather than adding anything to it. */}
+            {gstRate > 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                includes {formatAUD((total * gstRate) / (1 + gstRate))} GST
+              </p>
+            )}
           </div>
         </div>
       </div>

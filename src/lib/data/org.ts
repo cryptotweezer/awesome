@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Org, OrgMember } from "@/lib/types";
@@ -64,6 +65,24 @@ export async function requireOrg(): Promise<OrgContext> {
   return ctx;
 }
 
+/**
+ * The business a dashboard page belongs to.
+ *
+ * Every page except two needs one to show anything at all, so an account with
+ * no business is sent to the overview, which is the one page that has an empty
+ * state and where the tour runs. The two exceptions call getCurrentOrg
+ * directly: the overview itself, and Business details, where the business is
+ * created.
+ *
+ * Nothing in the interface links here while there is no business (the
+ * navigation and the cards are disabled), so this only catches a typed URL.
+ */
+export async function orgForPage(): Promise<Org> {
+  const org = (await getCurrentOrg())?.org;
+  if (!org) redirect("/");
+  return org;
+}
+
 /** Load one org by id. Used by the gateway, which authenticates by key. */
 export async function getOrg(orgId: string): Promise<Org | null> {
   const db = createAdminClient();
@@ -87,10 +106,13 @@ export function signatureFor(member: OrgMember): string {
 export type NewOrgInput = {
   /** The business name, printed on every document. */
   name: string;
-  /** Who holds the ABN or TFN. Often the same as the business name. */
+  /** The legal name the ABN is registered to. Often the business name. */
   issuer_name: string;
+  /** The ABN. Eleven digits; anything else is rejected by the database. */
   tax_id: string;
-  tax_id_label: "ABN" | "TFN" | "ACN";
+  /** A company's ACN, nine digits, printed under the ABN. */
+  acn: string | null;
+  tax_id_label: "ABN" | "ACN";
   entity_type: "sole_trader" | "company" | "partnership" | "trust";
   address_line: string | null;
   suburb: string | null;
@@ -141,6 +163,7 @@ export async function createOrg(
     p_payment_note: input.payment_note,
     p_terms_days: input.terms_days,
     p_timezone: input.timezone,
+    p_acn: input.acn,
   });
   if (error || !data) {
     throw new Error(error?.message ?? "Failed to create the business");
@@ -151,15 +174,20 @@ export async function createOrg(
 /**
  * Everything the settings page can change about an existing business.
  *
- * The tax number and the issuer holding it are deliberately absent: past
- * invoices carry their own snapshot of both, and changing the entity behind a
- * live business is a different operation from fixing a typo in an address.
+ * The tax number and the entity holding it are not here because they live on
+ * `issuers`, not on the org: see updateIssuer below.
  */
 export type OrgSettingsInput = Omit<
   NewOrgInput,
-  "issuer_name" | "tax_id" | "display_name"
+  "issuer_name" | "tax_id" | "acn" | "display_name"
 > & {
   logo_path: string | null;
+  /** The usual service, if there is one. "" means described per line. */
+  default_service_description: string;
+  /** Whether a client carries an agreed service and rate. */
+  per_client_defaults: boolean;
+  /** Whether new invoices are issued with 10% GST inside the price. */
+  gst_registered: boolean;
 };
 
 export async function updateOrgSettings(
@@ -177,6 +205,46 @@ export async function updateOrgSettings(
     throw new Error(`Failed to save the business details: ${error?.message}`);
   }
   return data as Org;
+}
+
+/**
+ * Correct the entity whose tax number is printed: its legal name, its ABN and
+ * its optional ACN.
+ *
+ * Nothing already issued moves, because every invoice carries its own snapshot
+ * of the name and the ABN, the same way a line item carries its own rate. The
+ * database validates the digits and the ownership, so a wrong org id here buys
+ * nothing.
+ */
+export async function updateIssuer(
+  orgId: string,
+  issuerId: string,
+  input: { full_name: string; abn: string; acn: string | null },
+): Promise<void> {
+  const db = createAdminClient();
+  const { error } = await db.rpc("update_issuer", {
+    p_org_id: orgId,
+    p_issuer_id: issuerId,
+    p_full_name: input.full_name,
+    p_abn: input.abn,
+    p_acn: input.acn,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Who signs the invoices this person creates by hand. */
+export async function updateMemberName(
+  orgId: string,
+  userId: string,
+  displayName: string,
+): Promise<void> {
+  const db = createAdminClient();
+  const { error } = await db
+    .from("org_members")
+    .update({ display_name: displayName })
+    .eq("org_id", orgId)
+    .eq("user_id", userId);
+  if (error) throw new Error(`Failed to save your name: ${error.message}`);
 }
 
 /**
@@ -205,7 +273,30 @@ export async function updateOrgOnboarding(
   if (error) throw new Error(`Failed to save progress: ${error.message}`);
 }
 
-/** Demo orgs get purged after a month of silence, so mark them as alive. */
+/**
+ * Close a trial account and take everything with it: the business, the
+ * membership, the issuers, the clients, the invoices, the line items and the
+ * agent keys. The logo lives in object storage and is removed by the caller.
+ *
+ * The Supabase user is deliberately left alone. That account is shared with the
+ * other projects in this Supabase instance, so deleting it here would sign
+ * somebody out of applications that have nothing to do with billing.
+ *
+ * Refusing anything that is not a trial is the database's job, not this
+ * function's, so no bug on this side can widen it.
+ */
+export async function deleteDemoOrg(orgId: string): Promise<string> {
+  const db = createAdminClient();
+  const { data, error } = await db.rpc("delete_demo_org", { p_org_id: orgId });
+  if (error) throw new Error(`Failed to delete the business: ${error.message}`);
+  return (data as string) ?? "";
+}
+
+/**
+ * Record that somebody signed in. The purge no longer reads this (a trial ends
+ * a month after sign-up, busy or not), so it is kept only as a "last seen"
+ * signal for support questions.
+ */
 export async function touchOrgActivity(orgId: string): Promise<void> {
   const db = createAdminClient();
   await db

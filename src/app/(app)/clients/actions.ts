@@ -38,8 +38,9 @@ export async function saveClientAction(
     postcode: str(formData, "postcode"),
     email: str(formData, "email"),
     default_issuer_id: str(formData, "default_issuer_id"),
-    default_description:
-      str(formData, "default_description") ?? "Cleaning Service",
+    // Left out of the form entirely by businesses that describe the work on
+    // each invoice line, which is most of them.
+    default_description: str(formData, "default_description"),
     default_rate: rate,
   };
 

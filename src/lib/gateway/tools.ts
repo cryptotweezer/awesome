@@ -95,7 +95,11 @@ const CLIENT_FIELDS = {
     type: "string",
     description: "UUID of the ABN that normally invoices this client.",
   },
-  default_description: { type: "string", description: "Defaults to 'Cleaning Service'." },
+  default_description: {
+    type: "string",
+    description:
+      "The work normally done for this client. Only businesses that agree it in advance use this.",
+  },
   default_rate: {
     type: "number",
     description: "Agreed price. Changing it never alters past invoices.",
@@ -124,7 +128,8 @@ const INVOICE_ITEMS_SCHEMA = {
       },
       description: {
         type: "string",
-        description: "Defaults to 'Cleaning Service'.",
+        description:
+          "What the work was. Optional only for a business that has a usual service set; otherwise required.",
       },
       quantity: { type: "number", exclusiveMinimum: 0, description: "Defaults to 1." },
     },
@@ -211,10 +216,11 @@ function items(input: ToolInput): NewInvoiceItem[] {
       throw new Error(`${at}.quantity must be a number greater than zero`);
     }
 
+    // Left as typed, blank included. What a blank line falls back to depends on
+    // the business, and the database is the one place that knows which business
+    // this is, so it decides: its usual service, or an error.
     const description =
-      typeof it.description === "string" && it.description.trim() !== ""
-        ? it.description.trim()
-        : "Cleaning Service";
+      typeof it.description === "string" ? it.description.trim() : "";
 
     return { description, service_date: serviceDate, quantity, rate };
   });
@@ -253,7 +259,7 @@ function clientInput(input: ToolInput): ClientInput {
     postcode: optStr(input, "postcode"),
     email: optStr(input, "email"),
     default_issuer_id: optStr(input, "default_issuer_id"),
-    default_description: optStr(input, "default_description") ?? "Cleaning Service",
+    default_description: optStr(input, "default_description"),
     default_rate: optNum(input, "default_rate"),
   };
 }
@@ -484,7 +490,7 @@ export const tools: Record<string, ToolDef> = {
       "Create an invoice. Args: client_id, issuer_id, items[], invoice_date? (when it is BILLED, defaults to today in Sydney), internal_notes?. " +
       "Each item is {service_date, rate, description?, quantity?}. service_date is REQUIRED and is the day the service was actually performed (YYYY-MM-DD); " +
       "it is often not the same as invoice_date, so ask the user which day it was instead of guessing. " +
-      "description defaults to 'Cleaning Service' and quantity to 1. Use the client's default_rate unless told otherwise.",
+      "description says what the work was (a business with a usual service can leave it out) and quantity defaults to 1. Use the client's default_rate unless told otherwise.",
     schema: {
       type: "object",
       required: ["client_id", "issuer_id", "items"],

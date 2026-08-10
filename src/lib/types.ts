@@ -2,7 +2,7 @@
 // Kept hand-written (not generated) so this repo stays isolated from the
 // resume/pis schemas that share the same Supabase project.
 
-// Clients always pay the full invoice — there is no partial state. Anything
+// Clients always pay the full invoice, there is no partial state. Anything
 // unusual about a payment goes in `internal_notes`.
 export type InvoiceStatus = "unpaid" | "paid" | "cancelled";
 
@@ -17,7 +17,8 @@ export interface Org {
   name: string; // PRINTED on documents (the legal/trading name)
   display_name: string | null; // shown in the dashboard
   entity_type: "sole_trader" | "company" | "partnership" | "trust";
-  tax_id_label: "ABN" | "TFN" | "ACN";
+  // No TFN: that is a person's private tax number and never goes on an invoice.
+  tax_id_label: "ABN" | "ACN";
 
   address_line: string | null;
   suburb: string | null;
@@ -36,6 +37,18 @@ export interface Org {
   email_body_template: string;
   statement_subject_template: string;
   statement_body_template: string;
+
+  // What this business always sells, if it always sells the same thing. Empty
+  // for everyone except Awesome, which cleans and nothing else.
+  default_service_description: string;
+
+  // Whether a client carries an agreed service and rate (Awesome) or the work
+  // is described on each invoice line (everyone else).
+  per_client_defaults: boolean;
+
+  // 10% GST, charged only by registered businesses. Prices include it, so this
+  // changes how an amount is explained, never what it is.
+  gst_registered: boolean;
 
   terms_days: number; // payment window; Awesome is 7
   timezone: string; // 'today' is resolved here, never in UTC
@@ -75,7 +88,8 @@ export interface Issuer {
   org_id: string;
   full_name: string;
   short_name: string; // 'Mavi' | 'Andres'
-  abn: string;
+  abn: string; // eleven digits, no spaces
+  acn: string | null; // nine digits; companies print both
   is_active: boolean;
   created_at: string;
 }
@@ -90,7 +104,7 @@ export interface Client {
   postcode: string | null;
   email: string | null;
   default_issuer_id: string | null;
-  default_description: string;
+  default_description: string | null; // the usual work, if there is one
   default_rate: number | null;
   is_active: boolean;
   created_at: string;
@@ -137,6 +151,7 @@ export interface Invoice {
   issuer_id: string;
   issuer_name: string;
   issuer_abn: string;
+  issuer_acn: string | null;
 
   client_id: string | null;
   bill_to_name: string;
@@ -151,10 +166,13 @@ export interface Invoice {
 
   currency: string; // 'AUD'
   subtotal: number;
-  total: number;
+  total: number; // GST included: this is what the client pays
+  gst_rate: number; // 0.10 when issued under GST, 0 otherwise. Frozen at issue.
+  gst_amount: number; // the tax inside `total`, not on top of it
   paid_amount: number;
   balance_due: number;
   status: InvoiceStatus;
+  paid_at: string | null; // the day it was paid, in the org's timezone
 
   internal_notes: string | null; // not printed
   created_by: string | null; // internal signature of who made it (Ema/Claude/...)

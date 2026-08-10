@@ -21,7 +21,7 @@ export type ClientInput = {
   postcode: string | null;
   email: string | null;
   default_issuer_id: string | null;
-  default_description: string;
+  default_description: string | null;
   default_rate: number | null;
 };
 

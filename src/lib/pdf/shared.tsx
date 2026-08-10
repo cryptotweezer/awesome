@@ -98,15 +98,18 @@ export const base = StyleSheet.create({
 export function LetterHead({
   issuerName,
   issuerAbn,
+  issuerAcn,
   company,
   logo,
   taxIdLabel = "ABN",
 }: {
   issuerName: string;
   issuerAbn: string;
+  /** A company's ACN, printed under the ABN. Most businesses have none. */
+  issuerAcn?: string | null;
   company: CompanyProfile;
   logo: Logo | null;
-  /** ABN, TFN or ACN, whichever this business registered. */
+  /** ABN or ACN, whichever this business registered. Never a TFN. */
   taxIdLabel?: string;
 }) {
   return (
@@ -124,6 +127,11 @@ export function LetterHead({
           <Text style={base.issuerLine}>
             {taxIdLabel}: <Text style={base.abn}>{issuerAbn}</Text>
           </Text>
+          {issuerAcn && (
+            <Text style={base.issuerLine}>
+              ACN: <Text style={base.abn}>{issuerAcn}</Text>
+            </Text>
+          )}
         </View>
       </View>
       <Text style={base.businessName}>{company.business_name}</Text>

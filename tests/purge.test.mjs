@@ -4,8 +4,11 @@
 //
 // This is the only code in the system that deletes a whole business, so the
 // test that matters most is the one proving it will not touch the business that
-// owns the deployment, even when told to purge everything older than a moment
-// ago.
+// owns the deployment, even when aimed straight at it.
+//
+// Every call here names the business it is about (see `purge` below). Running
+// the purge unaimed against a real database deletes real trial accounts, and on
+// 2026-08-10 this file did exactly that.
 import { test, describe, after, before } from "node:test";
 import assert from "node:assert/strict";
 import { createClient } from "@supabase/supabase-js";
@@ -26,6 +29,19 @@ const db = createClient(url, key, {
 const AWESOME_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const LONG_AGO = "2020-01-01T00:00:00Z";
 
+/**
+ * Run the purge against ONE business, never the whole database.
+ *
+ * On 2026-08-10 this file called the purge unaimed and deleted a real guest
+ * account: the function cannot tell a test business from somebody's actual
+ * work, so "purge everything older than a day" meant exactly that. Every call
+ * here names its target, which still proves both halves of the rule, because
+ * the is_demo and age conditions are checked inside the function.
+ */
+function purge(days, orgId) {
+  return db.rpc("purge_stale_demo_orgs", { p_days: days, p_org_id: orgId });
+}
+
 /** A trial business, backdated so every activity signal looks ancient. */
 async function makeStaleOrg(name) {
   const userId = randomUUID();
@@ -35,7 +51,7 @@ async function makeStaleOrg(name) {
     p_display_name: "Purge Test",
     p_name: name,
     p_issuer_name: name,
-    p_tax_id: `7${userId.replace(/\D/g, "").slice(0, 10)}`,
+    p_tax_id: `7${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
   });
   assert.equal(error, null, error?.message);
   await db
@@ -79,8 +95,8 @@ after(async () => {
 });
 
 describe("the deployment owner is never purged", () => {
-  test("not even when purging everything older than a day", async () => {
-    const { data, error } = await db.rpc("purge_stale_demo_orgs", { p_days: 1 });
+  test("not even when aimed straight at it, at a day old", async () => {
+    const { data, error } = await purge(1, AWESOME_ORG_ID);
     assert.equal(error, null, error?.message);
 
     const purgedIds = (data ?? []).map((r) => r.purged_org_id);
@@ -113,7 +129,7 @@ describe("an abandoned trial is removed completely", () => {
   test("a dormant trial business is purged", async () => {
     orgId = await makeStaleOrg("Purge Test Dormant");
 
-    const { data, error } = await db.rpc("purge_stale_demo_orgs", { p_days: 30 });
+    const { data, error } = await purge(30, orgId);
     assert.equal(error, null, error?.message);
     assert.ok(
       (data ?? []).some((r) => r.purged_org_id === orgId),
@@ -133,8 +149,74 @@ describe("an abandoned trial is removed completely", () => {
   });
 });
 
-describe("activity is derived from the data, not just from signing in", () => {
-  test("a business with a recent invoice survives, however old its login", async () => {
+describe("the purge can be aimed at one business", () => {
+  test("an equally old trial standing next to it is untouched", async () => {
+    const target = await makeStaleOrg("Purge Test Target");
+    const bystander = await makeStaleOrg("Purge Test Bystander");
+
+    const { data, error } = await purge(30, target);
+    assert.equal(error, null, error?.message);
+
+    const purgedIds = (data ?? []).map((r) => r.purged_org_id);
+    assert.deepEqual(purgedIds, [target], "the purge went past its target");
+
+    const { data: still } = await db
+      .from("orgs")
+      .select("id")
+      .eq("id", bystander)
+      .maybeSingle();
+    assert.ok(still, "a business nobody asked about was deleted");
+  });
+});
+
+describe("closing your own account", () => {
+  test("the deployment owner cannot be closed, even when named directly", async () => {
+    const { error } = await db.rpc("delete_demo_org", { p_org_id: AWESOME_ORG_ID });
+    assert.ok(error, "delete_demo_org accepted the deployment owner");
+    assert.match(error.message, /not a trial/);
+
+    const { data: still } = await db
+      .from("orgs")
+      .select("id, name")
+      .eq("id", AWESOME_ORG_ID)
+      .maybeSingle();
+    assert.ok(still, "the deployment owner no longer exists");
+    assert.equal(still.name, awesomeBefore.name);
+
+    const { count } = await db
+      .from("invoices")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", AWESOME_ORG_ID);
+    assert.ok((count ?? 0) > 0, "the deployment owner lost its invoices");
+  });
+
+  test("a business that does not exist is refused too", async () => {
+    const { error } = await db.rpc("delete_demo_org", { p_org_id: randomUUID() });
+    assert.ok(error, "delete_demo_org accepted a business that does not exist");
+  });
+
+  test("a trial closes itself and leaves nothing behind", async () => {
+    const orgId = await makeStaleOrg("Purge Test Closing");
+
+    const { data: name, error } = await db.rpc("delete_demo_org", {
+      p_org_id: orgId,
+    });
+    assert.equal(error, null, error?.message);
+    assert.equal(name, "Purge Test Closing");
+
+    for (const table of ["orgs", "org_members", "issuers", "clients", "invoices"]) {
+      const column = table === "orgs" ? "id" : "org_id";
+      const { count } = await db
+        .from(table)
+        .select("*", { count: "exact", head: true })
+        .eq(column, orgId);
+      assert.equal(count, 0, `${table} still holds rows of the closed business`);
+    }
+  });
+});
+
+describe("a trial ends on its birthday, not when it goes quiet", () => {
+  test("a business that invoiced today is still purged once it is old enough", async () => {
     const orgId = await makeStaleOrg("Purge Test Working");
 
     const { data: issuers } = await db
@@ -147,22 +229,43 @@ describe("activity is derived from the data, not just from signing in", () => {
       .select("id")
       .single();
 
-    // Everything about this business looks ancient except that it just invoiced.
+    // Everything about this business looks ancient except that it just
+    // invoiced. Under the old rule that saved it; under this one nothing does,
+    // because a trial is not storage.
     const { error } = await db.rpc("create_invoice", {
       p_client_id: client.id,
       p_issuer_id: issuers[0].id,
       p_invoice_date: new Date().toISOString().slice(0, 10),
       p_created_by: "PurgeTest",
-      p_items: [{ rate: 10, service_date: "2026-08-01" }],
+      p_items: [{ rate: 10, service_date: "2026-08-01", description: "Work" }],
       p_internal_notes: null,
       p_org_id: orgId,
     });
     assert.equal(error, null, error?.message);
 
-    const { data: purged } = await db.rpc("purge_stale_demo_orgs", { p_days: 30 });
+    const { data: purged } = await purge(30, orgId);
     assert.ok(
-      !(purged ?? []).some((r) => r.purged_org_id === orgId),
-      "a business that invoiced today was treated as abandoned",
+      (purged ?? []).some((r) => r.purged_org_id === orgId),
+      "a trial older than a month survived because it was busy",
+    );
+  });
+
+  test("a trial created today is left alone", async () => {
+    const userId = randomUUID();
+    const { data, error } = await db.rpc("create_org", {
+      p_user_id: userId,
+      p_email: `purge-${userId.slice(0, 8)}@example.test`,
+      p_display_name: "Purge Test",
+      p_name: "Purge Test Fresh",
+      p_issuer_name: "Purge Test Fresh",
+      p_tax_id: `7${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
+    });
+    assert.equal(error, null, error?.message);
+
+    const { data: purged } = await purge(30, data.id);
+    assert.ok(
+      !(purged ?? []).some((r) => r.purged_org_id === data.id),
+      "a business that signed up minutes ago was deleted",
     );
   });
 });

@@ -233,6 +233,105 @@ export function financialYearEnd(start: string): string {
   return end.toISOString().slice(0, 10);
 }
 
+/** Same date arithmetic the financial year uses, one quarter at a time. */
+function addMonths(isoFirstOfMonth: string, months: number): string {
+  const [y, m] = isoFirstOfMonth.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + months, 1));
+  return d.toISOString().slice(0, 10);
+}
+
+function lastDayOfMonth(isoFirstOfMonth: string): string {
+  const [y, m] = isoFirstOfMonth.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 1));
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
+function monthsBetween(fromFirst: string, to: string): number {
+  const [fy, fm] = fromFirst.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+export type GstPosition = {
+  /** "Oct to Dec 2026" */
+  quarterLabel: string;
+  quarterStart: string;
+  quarterEnd: string;
+  /** When the ATO wants the BAS for that quarter. */
+  dueDate: string;
+  /** GST inside invoices PAID in the current quarter. */
+  quarter: number;
+  /** ... and in the financial year so far. */
+  fy: number;
+  fyLabel: string;
+};
+
+/**
+ * What this business currently owes the ATO in GST.
+ *
+ * Counted on a cash basis: an invoice contributes when it is PAID, not when it
+ * is issued, which is how most small businesses report and the only version
+ * that matches the money in the account. That is why invoices carry `paid_at`.
+ *
+ * GST is not a per-client matter, so this is one running figure: 10% of sales
+ * collected, less what was paid on purchases, which this app does not track.
+ * The number here is the sales half, which is the half a billing app knows.
+ */
+export async function getGstPosition(org: Org): Promise<GstPosition> {
+  const today = todayInTimezone(org.timezone);
+  const fyStart = financialYearStart(today, org.fy_start_month);
+
+  const quarter = Math.floor(monthsBetween(fyStart, today) / 3);
+  const quarterStart = addMonths(fyStart, quarter * 3);
+  const quarterEnd = lastDayOfMonth(addMonths(quarterStart, 2));
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("gst_amount, paid_at")
+    .eq("org_id", org.id)
+    .eq("status", "paid")
+    .gte("paid_at", fyStart);
+  if (error) throw new Error(`Failed to load GST: ${error.message}`);
+
+  let fy = 0;
+  let inQuarter = 0;
+  for (const r of (data ?? []) as { gst_amount: number; paid_at: string }[]) {
+    const amount = Number(r.gst_amount);
+    fy += amount;
+    if (r.paid_at >= quarterStart && r.paid_at <= quarterEnd) inQuarter += amount;
+  }
+
+  return {
+    quarterLabel: `${monthName(quarterStart)} to ${monthName(quarterEnd)} ${quarterEnd.slice(0, 4)}`,
+    quarterStart,
+    quarterEnd,
+    dueDate: basDueDate(quarterEnd),
+    quarter: inQuarter,
+    fy,
+    fyLabel: financialYearLabel(fyStart),
+  };
+}
+
+function monthName(iso: string): string {
+  return [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ][Number(iso.slice(5, 7)) - 1];
+}
+
+/**
+ * A quarterly BAS is due 28 days after the quarter ends, except the one ending
+ * in December, which the ATO gives until 28 February because of the holidays.
+ */
+function basDueDate(quarterEnd: string): string {
+  const [y, m] = quarterEnd.split("-").map(Number);
+  if (m === 12) return `${y + 1}-02-28`;
+  const due = new Date(Date.UTC(y, m, 28));
+  return due.toISOString().slice(0, 10);
+}
+
 export type PeriodTotal = { fy: number; all: number };
 
 export type BillingTotals = {

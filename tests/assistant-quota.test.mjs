@@ -49,7 +49,7 @@ describe("a trial account gets a fixed allowance", () => {
       p_display_name: "Quota Test",
       p_name: "Quota Test Business",
       p_issuer_name: "Quota Test Business",
-      p_tax_id: `8${userId.replace(/\D/g, "").slice(0, 10)}`,
+      p_tax_id: `8${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
     });
     assert.equal(error, null, error?.message);
     orgId = data.id;

@@ -1,13 +1,13 @@
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
 import { getNextInvoiceNumber } from "@/lib/data/invoices";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { todayInTimezone } from "@/lib/format";
 import { InvoiceForm } from "./invoice-form";
 import { createInvoiceAction } from "./actions";
 
 export default async function NewInvoicePage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const [clients, issuers, nextNumber] = await Promise.all([
     listClients(org.id),
     listIssuers(org.id),
@@ -23,7 +23,7 @@ export default async function NewInvoicePage() {
           </h1>
           {nextNumber != null && (
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              This invoice will be #{nextNumber} — the final number is assigned
+              This invoice will be #{nextNumber}. The final number is assigned
               when you save.
             </p>
           )}
@@ -44,6 +44,9 @@ export default async function NewInvoicePage() {
         clients={clients}
         issuers={issuers}
         today={todayInTimezone(org.timezone)}
+        termsDays={org.terms_days}
+        gstRate={org.gst_registered ? 0.1 : 0}
+        defaultDescription={org.default_service_description ?? ""}
         action={createInvoiceAction}
       />
     </div>

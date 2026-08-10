@@ -19,10 +19,17 @@ type Message = {
 export function Chat({
   suggestions,
   remaining,
+  storageKey,
 }: {
   suggestions: string[];
   /** Messages left on a trial account, or null when there is no limit. */
   remaining: number | null;
+  /**
+   * Where this conversation is kept between pages and reloads. Keyed by
+   * organisation, never global: signing in as a different business must not
+   * show the previous one's conversation.
+   */
+  storageKey: string;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -30,6 +37,36 @@ export function Chat({
   const [error, setError] = useState<string | null>(null);
   const [left, setLeft] = useState<number | null>(remaining);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Restored after mount rather than during render: the server has no
+  // localStorage, and reading it while rendering would make the two disagree.
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      // Restoring a browser store on mount is what an effect is for: it cannot
+      // be an initial value, because the server renders first and has none.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setMessages(JSON.parse(saved) as Message[]);
+    } catch {
+      // Unreadable or full: a lost conversation is not worth an error.
+    }
+    setRestored(true);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!restored) return; // never overwrite the saved copy with the empty one
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(messages));
+    } catch {
+      // Quota, private mode, whatever. The chat still works.
+    }
+  }, [messages, restored, storageKey]);
+
+  function clear() {
+    setMessages([]);
+    setError(null);
+  }
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -78,7 +115,8 @@ export function Chat({
   const exhausted = left !== null && left <= 0;
 
   return (
-    <div className="flex h-[calc(100vh-14rem)] flex-col rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+    // Fills whatever it is put in: the panel decides how big the chat is.
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex-1 space-y-4 overflow-y-auto p-5">
         {messages.length === 0 && (
           <div className="space-y-4">
@@ -161,13 +199,26 @@ export function Chat({
         </button>
       </form>
 
-      {left !== null && (
-        <p className="px-4 pb-3 text-xs text-slate-400 dark:text-slate-500">
-          {left > 0
-            ? `${left} assistant ${left === 1 ? "message" : "messages"} left on this trial account. Connecting your own AI removes the limit.`
-            : "You have used the assistant messages that come with a trial account. Connect your own AI from the setup guide to keep going."}
-        </p>
-      )}
+      <div className="flex items-start justify-between gap-3 px-4 pb-3">
+        {left !== null ? (
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            {left > 0
+              ? `${left} assistant ${left === 1 ? "message" : "messages"} left on this trial account. Clearing the conversation does not give any back. Connecting your own AI removes the limit.`
+              : "You have used the assistant messages that come with a trial account. Connect your own AI from the setup guide to keep going."}
+          </p>
+        ) : (
+          <span />
+        )}
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={clear}
+            className="shrink-0 text-xs font-medium text-slate-400 underline transition hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+          >
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   );
 }

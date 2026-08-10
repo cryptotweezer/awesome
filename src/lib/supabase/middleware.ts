@@ -33,8 +33,8 @@ function isSelfAuthenticated(request: NextRequest): boolean {
  *
  * What it deliberately does NOT do is look up the user's organisation. That
  * would be a database round trip on every single request, so it happens once
- * per page in the app layout instead, which redirects to /onboarding when the
- * user has no business yet.
+ * per page in the app layout instead, which shows the tour when the user has
+ * no business yet.
  */
 export async function updateSession(request: NextRequest) {
   if (isSelfAuthenticated(request)) {

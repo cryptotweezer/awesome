@@ -1,10 +1,10 @@
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { ClientsManager } from "./clients-manager";
 
 export default async function ClientsPage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const [clients, issuers] = await Promise.all([
     listClients(org.id),
     listIssuers(org.id),
@@ -31,7 +31,12 @@ export default async function ClientsPage() {
         </div>
       </div>
 
-      <ClientsManager clients={clients} issuers={issuers} />
+      <ClientsManager
+        clients={clients}
+        issuers={issuers}
+        perClientDefaults={org.per_client_defaults}
+        defaultDescription={org.default_service_description ?? ""}
+      />
     </div>
   );
 }

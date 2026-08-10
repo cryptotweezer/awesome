@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInvoice } from "@/lib/data/invoices";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { formatAUD, formatDate } from "@/lib/format";
 import { InvoiceActions } from "./invoice-actions";
 
@@ -18,7 +18,7 @@ export default async function InvoiceDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const inv = await getInvoice(org.id, id);
   if (!inv) notFound();
 
@@ -129,6 +129,20 @@ export default async function InvoiceDetailPage({
         {/* Totals */}
         <div className="mt-6 flex justify-end">
           <div className="w-full max-w-xs space-y-1 text-sm">
+            {/* Only when this invoice was issued with GST inside it. The rate
+                is the invoice's own, not the business's current one. */}
+            {Number(inv.gst_amount) > 0 && (
+              <>
+                <Row
+                  label="Subtotal"
+                  value={formatAUD(Number(inv.total) - Number(inv.gst_amount))}
+                />
+                <Row
+                  label={`GST (${(Number(inv.gst_rate) * 100).toFixed(0)}%)`}
+                  value={formatAUD(Number(inv.gst_amount))}
+                />
+              </>
+            )}
             <Row label="Total" value={formatAUD(Number(inv.total))} />
             <Row label="Paid" value={formatAUD(Number(inv.paid_amount))} />
             <div className="flex justify-between border-t border-slate-200 dark:border-slate-800 pt-2 text-base font-bold text-slate-900 dark:text-slate-100">

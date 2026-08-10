@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import JSZip from "jszip";
+import { appBaseUrl } from "@/lib/app-url";
 import { requireOrg, updateOrgOnboarding } from "@/lib/data/org";
 import { mintAgentKey } from "@/lib/data/agent-keys";
 import { listIssuers } from "@/lib/data/issuers";
@@ -25,19 +25,6 @@ export type KitState = {
 };
 
 /**
- * Where this deployment lives, from the request itself. Hardcoding it would
- * break the moment somebody runs their own copy, which is the whole point of
- * the kit this URL goes into.
- */
-async function baseUrl(): Promise<string> {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto =
-    h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
-
-/**
  * Mint a key and build the install kit around it, in one step.
  *
  * It has to be one step: the raw key exists only in the request that creates
@@ -56,7 +43,7 @@ export async function createAgentKitAction(
     const [{ key }, issuers, url] = await Promise.all([
       mintAgentKey(org.id, label),
       listIssuers(org.id),
-      baseUrl(),
+      appBaseUrl(),
     ]);
 
     const ctx = { org, issuer: issuers[0] ?? null, key, baseUrl: url };

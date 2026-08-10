@@ -3,12 +3,12 @@ import {
   listFinancialYears,
 } from "@/lib/data/statements";
 import { listIssuers } from "@/lib/data/issuers";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { ClientStatementPicker } from "./statement-picker";
 import { FyStatementPicker } from "./fy-picker";
 
 export default async function StatementsPage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const [targets, years, issuers] = await Promise.all([
     listStatementTargets(org),
     listFinancialYears(org),

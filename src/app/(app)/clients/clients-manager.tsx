@@ -10,17 +10,29 @@ import {
 
 const initial: ActionState = { ok: false };
 
+const BLANK = "–"; // en dash, for a cell with nothing in it
+
 function formatRate(rate: number | null) {
-  if (rate === null) return "—";
+  if (rate === null) return BLANK;
   return `AUD ${rate.toFixed(2)}`;
 }
 
 export function ClientsManager({
   clients,
   issuers,
+  perClientDefaults,
+  defaultDescription,
 }: {
   clients: ClientWithIssuer[];
   issuers: Issuer[];
+  /**
+   * Whether this business agrees a standard service and rate with each client,
+   * the way Awesome does. When it does not, a client is only a name and an
+   * address: what the work was and what it cost are said on the invoice line,
+   * and asking for them twice is just a form to fill in for nothing.
+   */
+  perClientDefaults: boolean;
+  defaultDescription: string;
 }) {
   // null = closed; "new" = add; otherwise the client being edited.
   const [editing, setEditing] = useState<ClientWithIssuer | "new" | null>(null);
@@ -43,7 +55,9 @@ export function ClientsManager({
               <th className="px-4 py-3 font-medium">Client</th>
               <th className="px-4 py-3 font-medium">Address</th>
               <th className="px-4 py-3 font-medium">ABN</th>
-              <th className="px-4 py-3 text-right font-medium">Rate</th>
+              {perClientDefaults && (
+                <th className="px-4 py-3 text-right font-medium">Rate</th>
+              )}
               <th className="px-4 py-3 text-right font-medium">Actions</th>
             </tr>
           </thead>
@@ -51,7 +65,7 @@ export function ClientsManager({
             {clients.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={perClientDefaults ? 5 : 4}
                   className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
                 >
                   No clients yet.
@@ -76,7 +90,7 @@ export function ClientsManager({
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                   {[c.address_line, c.suburb, c.state, c.postcode]
                     .filter(Boolean)
-                    .join(", ") || "—"}
+                    .join(", ") || BLANK}
                 </td>
                 <td className="px-4 py-3">
                   {c.issuer ? (
@@ -85,13 +99,15 @@ export function ClientsManager({
                     </span>
                   ) : (
                     <span className="text-slate-400 dark:text-slate-500">
-                      —
+                      {BLANK}
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
-                  {formatRate(c.default_rate)}
-                </td>
+                {perClientDefaults && (
+                  <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
+                    {formatRate(c.default_rate)}
+                  </td>
+                )}
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     <button
@@ -113,6 +129,8 @@ export function ClientsManager({
         <ClientDialog
           client={editing === "new" ? null : editing}
           issuers={issuers}
+          perClientDefaults={perClientDefaults}
+          defaultDescription={defaultDescription}
           onClose={() => setEditing(null)}
         />
       )}
@@ -123,10 +141,14 @@ export function ClientsManager({
 function ClientDialog({
   client,
   issuers,
+  perClientDefaults,
+  defaultDescription,
   onClose,
 }: {
   client: ClientWithIssuer | null;
   issuers: Issuer[];
+  perClientDefaults: boolean;
+  defaultDescription: string;
   onClose: () => void;
 }) {
   const [state, action, pending] = useActionState(saveClientAction, initial);
@@ -144,6 +166,24 @@ function ClientDialog({
 
         <form action={action} className="mt-4 space-y-4">
           {client && <input type="hidden" name="id" value={client.id} />}
+
+          {/* A hidden field is not the same as no field: the action reads the
+              form, so leaving these out would quietly erase what a business
+              had already agreed with this client. */}
+          {!perClientDefaults && client && (
+            <>
+              <input
+                type="hidden"
+                name="default_rate"
+                value={client.default_rate ?? ""}
+              />
+              <input
+                type="hidden"
+                name="default_description"
+                value={client.default_description ?? ""}
+              />
+            </>
+          )}
 
           <Field label="Name" required>
             <input
@@ -170,7 +210,7 @@ function ClientDialog({
                   defaultValue={client?.default_issuer_id ?? ""}
                   className="input"
                 >
-                  <option value="">— none —</option>
+                  <option value="">(none)</option>
                   {issuers.map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.short_name} ({i.abn})
@@ -179,25 +219,31 @@ function ClientDialog({
                 </select>
               </Field>
             )}
-            <Field label="Rate (AUD)">
+            {perClientDefaults && (
+              <Field label="Rate (AUD)">
+                <input
+                  name="default_rate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={client?.default_rate ?? ""}
+                  className="input"
+                />
+              </Field>
+            )}
+          </div>
+
+          {/* Only for a business that agrees the work in advance. Everyone else
+              says what it was on the invoice line, where it belongs. */}
+          {perClientDefaults && (
+            <Field label="Default service">
               <input
-                name="default_rate"
-                type="number"
-                step="0.01"
-                min="0"
-                defaultValue={client?.default_rate ?? ""}
+                name="default_description"
+                defaultValue={client?.default_description ?? defaultDescription}
                 className="input"
               />
             </Field>
-          </div>
-
-          <Field label="Default service">
-            <input
-              name="default_description"
-              defaultValue={client?.default_description ?? "Cleaning Service"}
-              className="input"
-            />
-          </Field>
+          )}
 
           <Field label="Email">
             <input

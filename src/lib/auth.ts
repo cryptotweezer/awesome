@@ -8,7 +8,7 @@
  *                                      stays until the guest experience is
  *                                      finished and reviewed.
  *   GUEST_SIGNUP = "true"          ->  anyone with a Google account gets in and
- *                                      is sent to /onboarding to create their
+ *                                      is shown the tour, which creates their
  *                                      own business.
  *
  * Opening registration is therefore an environment-variable change and not a

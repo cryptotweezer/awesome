@@ -147,7 +147,7 @@ export async function updateInvoiceAction(
 
   const items = payload.items
     .map((it) => ({
-      description: it.description?.trim() || "Cleaning Service",
+      description: it.description?.trim() ?? "",
       service_date: it.service_date || null,
       quantity: Number(it.quantity) || 0,
       rate: Number(it.rate) || 0,

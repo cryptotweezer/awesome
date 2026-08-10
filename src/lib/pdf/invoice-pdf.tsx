@@ -71,6 +71,15 @@ const s = StyleSheet.create({
   },
   stampCancelled: { borderColor: "#b91c1c", color: "#b91c1c" },
   stampPaid: { borderColor: "#15803d", color: "#15803d" },
+
+  // Only printed by businesses registered for GST. The ATO wants the words
+  // "tax invoice" on the document itself, not only in the file name.
+  taxInvoice: {
+    marginTop: 10,
+    fontFamily: "Helvetica-Bold",
+    fontSize: 13,
+    letterSpacing: 1,
+  },
 });
 
 export type InvoicePdfData = Invoice & { invoice_items: InvoiceItem[] };
@@ -97,19 +106,27 @@ export function InvoiceDocument({
     (a, b) => a.sort_order - b.sort_order,
   );
 
+  // The invoice's own frozen answer, not the business's current registration:
+  // reprinting an old invoice must show what was charged at the time.
+  const gst = Number(invoice.gst_amount ?? 0);
+  const withGst = gst > 0;
+
   return (
     <Document
-      title={`Invoice ${invoice.invoice_number} — ${invoice.bill_to_name}`}
+      title={`${withGst ? "Tax invoice" : "Invoice"} ${invoice.invoice_number} — ${invoice.bill_to_name}`}
       author={company.business_name}
     >
       <Page size="A4" style={base.page}>
         <LetterHead
           issuerName={invoice.issuer_name}
           issuerAbn={invoice.issuer_abn}
+          issuerAcn={invoice.issuer_acn}
           company={company}
           logo={logo}
           taxIdLabel={taxIdLabel}
         />
+
+        {withGst && <Text style={s.taxInvoice}>TAX INVOICE</Text>}
 
         <View style={s.midRow}>
           <View>
@@ -157,6 +174,22 @@ export function InvoiceDocument({
 
         <View style={s.totals}>
           <View style={s.totalsBox}>
+            {/* Prices include GST, so the tax is shown inside the total rather
+                than added to it: the client pays the same number either way. */}
+            {withGst && (
+              <>
+                <View style={s.totalRow}>
+                  <Text>Subtotal</Text>
+                  <Text>{money(Number(invoice.total) - gst)}</Text>
+                </View>
+                <View style={s.totalRow}>
+                  <Text>
+                    GST ({(Number(invoice.gst_rate) * 100).toFixed(0)}%)
+                  </Text>
+                  <Text>{money(gst)}</Text>
+                </View>
+              </>
+            )}
             <View style={s.totalRow}>
               <Text>Total</Text>
               <Text>{money(Number(invoice.total))}</Text>

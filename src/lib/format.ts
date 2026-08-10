@@ -66,3 +66,15 @@ export function formatDate(iso: string | null | undefined): string {
   if (!y || !m || !d) return iso;
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
+
+/**
+ * Whole days between a timestamp and now, floored at zero.
+ *
+ * Used for "this trial ends in N days". Deliberately not timezone-aware: it
+ * counts elapsed time, not calendar days, which is exactly what the purge does.
+ */
+export function daysSince(iso: string): number {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return 0;
+  return Math.max(0, Math.floor((Date.now() - then) / 86_400_000));
+}

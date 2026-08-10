@@ -1,9 +1,9 @@
 import { listAgentKeys } from "@/lib/data/agent-keys";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { KeysManager } from "./keys-manager";
 
 export default async function AgentKeysPage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const keys = await listAgentKeys(org.id);
   const active = keys.filter((k) => k.is_active).length;
 

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
 import { getInvoice } from "@/lib/data/invoices";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { todayInTimezone } from "@/lib/format";
 import { InvoiceForm } from "../../new/invoice-form";
 import { updateInvoiceAction } from "../actions";
@@ -14,7 +14,7 @@ export default async function EditInvoicePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const [inv, clients, issuers] = await Promise.all([
     getInvoice(org.id, id),
     listClients(org.id),
@@ -50,7 +50,7 @@ export default async function EditInvoicePage({
           Edit invoice #{inv.invoice_number}
         </h1>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Fix any detail — the invoice number stays the same. Totals and due
+          Fix any detail: the invoice number stays the same. Totals and due
           date recalculate on save.
         </p>
       </div>
@@ -59,6 +59,11 @@ export default async function EditInvoicePage({
         clients={clients}
         issuers={issuers}
         today={todayInTimezone(org.timezone)}
+        termsDays={org.terms_days}
+        // The invoice's own rate, not the business's current one: editing an
+        // invoice never changes the tax it was issued under.
+        gstRate={Number(inv.gst_rate ?? 0)}
+        defaultDescription={org.default_service_description ?? ""}
         initial={initial}
         submitLabel="Save changes"
         action={updateInvoiceAction.bind(null, id)}

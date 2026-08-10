@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { listInvoices } from "@/lib/data/invoices";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 import { todayInTimezone } from "@/lib/format";
 import { HistoryTable } from "./history-table";
 
 export default async function HistoryPage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const invoices = await listInvoices(org.id);
   const today = todayInTimezone(org.timezone);
 

@@ -57,6 +57,21 @@ Please find attached your current account statement from {business_name}, showin
 Thanks,
 {business_name}',
 
+  -- What this business always sells, if it always sells the same thing. It
+  -- pre-fills the client and invoice forms. Empty means the work is described
+  -- line by line, which is the case for most businesses.
+  default_service_description text not null default '',
+
+  -- Whether the service and the rate are agreed per client (Awesome) or said
+  -- on each invoice line (most businesses). It decides what the client form
+  -- asks for, nothing else.
+  per_client_defaults boolean not null default false,
+
+  -- Australia's GST is 10% and only registered businesses charge it. Prices
+  -- INCLUDE it, so turning this on does not change what anything costs, only
+  -- how the same amount is explained on the invoice.
+  gst_registered boolean not null default false,
+
   terms_days     integer not null default 7,     -- the payment window
   timezone       text    not null default 'Australia/Sydney',
   fy_start_month integer not null default 7,     -- 7 = Australian financial year
@@ -86,8 +101,10 @@ Thanks,
   constraint orgs_entity_type_check check (
     entity_type = any (array['sole_trader'::text, 'company'::text, 'partnership'::text, 'trust'::text])
   ),
+  -- No TFN, on purpose: that is a person's private tax number and it must
+  -- never reach a printed invoice.
   constraint orgs_tax_id_label_check check (
-    tax_id_label = any (array['ABN'::text, 'TFN'::text, 'ACN'::text])
+    tax_id_label = any (array['ABN'::text, 'ACN'::text])
   ),
   constraint orgs_terms_days_check check (terms_days between 0 and 365),
   constraint orgs_fy_start_month_check check (fy_start_month between 1 and 12),
@@ -119,11 +136,13 @@ create table if not exists awesome.issuers (
   org_id     uuid        not null,
   full_name  text        not null,
   short_name text        not null,
-  abn        text        not null,
+  abn        text        not null,   -- eleven digits, no spaces
+  acn        text,                   -- nine digits; companies print both
   is_active  boolean     not null default true,
   created_at timestamptz not null default now(),
   constraint issuers_pkey primary key (id),
   constraint issuers_org_abn_key unique (org_id, abn),
+  constraint issuers_acn_check check (acn is null or acn ~ '^[0-9]{9}$'),
   constraint issuers_org_fkey foreign key (org_id)
     references awesome.orgs(id) on delete cascade
 );
@@ -138,7 +157,7 @@ create table if not exists awesome.clients (
   postcode            text,
   email               text,
   default_issuer_id   uuid,
-  default_description text          not null default 'Cleaning Service',
+  default_description text,         -- optional: the usual work for this client
   default_rate        numeric(10,2),
   is_active           boolean       not null default true,
   created_at          timestamptz   not null default now(),
@@ -159,6 +178,7 @@ create table if not exists awesome.invoices (
   issuer_id            uuid          not null,
   issuer_name          text          not null,
   issuer_abn           text          not null,
+  issuer_acn           text,
   client_id            uuid,
   bill_to_name         text          not null,
   bill_to_address_line text,
@@ -171,9 +191,14 @@ create table if not exists awesome.invoices (
   currency             text          not null default 'AUD',
   subtotal             numeric(10,2) not null default 0,
   total                numeric(10,2) not null default 0,
+  -- Frozen at issue, like the rate on a line item: registering for GST must
+  -- not add tax to invoices already sent, and deregistering must not remove it.
+  gst_rate             numeric(5,4)  not null default 0,
+  gst_amount           numeric(10,2) not null default 0,
   paid_amount          numeric(10,2) not null default 0,
   balance_due          numeric(10,2) not null default 0,
   status               text          not null default 'unpaid',
+  paid_at              date,          -- the day the money arrived; cash-basis BAS
   internal_notes       text,          -- never printed on any document
   created_at           timestamptz   not null default now(),
   updated_at           timestamptz   not null default now(),
@@ -190,7 +215,7 @@ create table if not exists awesome.invoice_items (
   id           uuid          not null default gen_random_uuid(),
   org_id       uuid          not null,   -- denormalised; kept in step by a trigger
   invoice_id   uuid          not null,
-  description  text          not null default 'Cleaning Service',
+  description  text          not null,
   service_date date,                     -- the day the work was done
   quantity     numeric(10,2) not null default 1,
   rate         numeric(10,2) not null,
@@ -228,6 +253,7 @@ create index if not exists agent_keys_org_idx       on awesome.agent_keys (org_i
 create index if not exists invoice_items_org_idx    on awesome.invoice_items (org_id);
 create index if not exists invoices_org_status_idx  on awesome.invoices (org_id, status);
 create index if not exists invoices_org_date_idx    on awesome.invoices (org_id, invoice_date desc);
+create index if not exists invoices_org_paid_at_idx on awesome.invoices (org_id, paid_at) where status = 'paid';
 
 -- ---------------------------------------------------------------------
 --  Access. RLS on, no policies: service_role only, from the server only.
@@ -269,13 +295,19 @@ returns trigger language plpgsql set search_path to '' as $function$
 declare
   v_org_days integer;
   v_days     integer;
+  v_gst      boolean;
 begin
-  select o.terms_days into v_org_days from awesome.orgs o where o.id = new.org_id;
+  select o.terms_days, o.gst_registered
+    into v_org_days, v_gst
+    from awesome.orgs o where o.id = new.org_id;
   v_org_days := coalesce(v_org_days, 7);
 
   if tg_op = 'INSERT' then
     v_days := v_org_days;
     new.terms := 'NET' || v_days;
+    -- Frozen here and never touched again: the rate this invoice was issued
+    -- under, not the rate the business happens to be on today.
+    new.gst_rate := case when coalesce(v_gst, false) then 0.10 else 0 end;
   else
     v_days := coalesce(substring(new.terms from '^NET([0-9]+)$')::int, v_org_days);
   end if;
@@ -304,6 +336,23 @@ begin
       new.status := 'unpaid';
     end if;
   end if;
+
+  -- The price already contains the tax, so at 10% the GST is an eleventh of
+  -- the total. Recomputed on every write because editing the lines changes it.
+  new.gst_amount := round(
+    new.total * coalesce(new.gst_rate, 0) / (1 + coalesce(new.gst_rate, 0)), 2
+  );
+
+  -- The day the money arrived, in the business's own timezone, which is what a
+  -- cash-basis BAS counts. Cleared again if an invoice goes back to unpaid.
+  if new.status = 'paid' then
+    if new.paid_at is null then
+      new.paid_at := awesome.org_today(new.org_id);
+    end if;
+  else
+    new.paid_at := null;
+  end if;
+
   new.updated_at := now();
   return new;
 end $function$;
@@ -439,6 +488,14 @@ $$;
 --  Onboarding: a business, its owner and its issuer, created together.
 -- ---------------------------------------------------------------------
 
+-- Digits are the number; spaces are how people read it out. Storing the
+-- keystrokes would make "40 243 400 997" and "40243400997" two different
+-- businesses to the unique index, so everything normalises through here.
+create or replace function awesome.digits(p_text text)
+returns text
+language sql immutable
+as $$ select regexp_replace(coalesce(p_text, ''), '\D', '', 'g') $$;
+
 create or replace function awesome.create_org(
   p_user_id      uuid,
   p_email        text,
@@ -460,23 +517,31 @@ create or replace function awesome.create_org(
   p_bank_account_name text default null,
   p_payment_note      text default null,
   p_terms_days   integer default 7,
-  p_timezone     text default 'Australia/Sydney'
+  p_timezone     text default 'Australia/Sydney',
+  p_acn          text default null
 )
 returns awesome.orgs
 language plpgsql security definer
 set search_path to 'awesome', 'pg_catalog'
 as $$
 declare
-  v_org awesome.orgs;
+  v_org    awesome.orgs;
+  v_abn    text := awesome.digits(p_tax_id);
+  v_acn    text := nullif(awesome.digits(p_acn), '');
+  v_name   text := btrim(coalesce(p_name, ''));
+  v_issuer text := coalesce(nullif(btrim(coalesce(p_issuer_name, '')), ''), btrim(coalesce(p_name, '')));
 begin
   if p_user_id is null then
     raise exception 'create_org: a signed-in user is required';
   end if;
-  if coalesce(btrim(p_name), '') = '' then
+  if v_name = '' then
     raise exception 'create_org: the business name is required';
   end if;
-  if coalesce(btrim(p_tax_id), '') = '' then
-    raise exception 'create_org: the % is required', coalesce(p_tax_id_label, 'ABN');
+  if length(v_abn) <> 11 then
+    raise exception 'create_org: an ABN is eleven digits';
+  end if;
+  if v_acn is not null and length(v_acn) <> 9 then
+    raise exception 'create_org: an ACN is nine digits';
   end if;
   if exists (select 1 from awesome.org_members m where m.user_id = p_user_id) then
     raise exception 'create_org: this account already belongs to a business';
@@ -488,8 +553,9 @@ begin
     bank_name, bank_bsb, bank_account_no, bank_account_name, payment_note,
     terms_days, timezone, invoice_number_start, next_invoice_number, is_demo
   ) values (
-    btrim(p_name), btrim(p_name),
-    coalesce(p_entity_type, 'sole_trader'), coalesce(p_tax_id_label, 'ABN'),
+    v_name, v_name,
+    coalesce(p_entity_type, 'sole_trader'),
+    case when p_tax_id_label = 'ACN' then 'ACN' else 'ABN' end,
     p_address_line, p_suburb, coalesce(p_state, 'NSW'), p_postcode,
     coalesce(p_contact_email, p_email), p_phone,
     p_bank_name, p_bank_bsb, p_bank_account_no, p_bank_account_name, p_payment_note,
@@ -501,19 +567,67 @@ begin
   insert into awesome.org_members (org_id, user_id, email, display_name, role)
   values (
     v_org.id, p_user_id, p_email,
-    coalesce(nullif(btrim(p_display_name), ''), split_part(p_email, '@', 1)),
+    coalesce(nullif(btrim(coalesce(p_display_name, '')), ''), split_part(p_email, '@', 1)),
     'owner'
   );
 
-  insert into awesome.issuers (org_id, full_name, short_name, abn)
-  values (
-    v_org.id,
-    coalesce(nullif(btrim(p_issuer_name), ''), btrim(p_name)),
-    left(coalesce(nullif(btrim(p_issuer_name), ''), btrim(p_name)), 20),
-    btrim(p_tax_id)
-  );
+  insert into awesome.issuers (org_id, full_name, short_name, abn, acn)
+  values (v_org.id, v_issuer, left(v_issuer, 20), v_abn, v_acn);
 
   return v_org;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+--  Fixing the entity behind the invoices: the name on the ABN, the ABN
+--  itself and the optional ACN. Editing them changes nothing already issued,
+--  because an invoice snapshots issuer_name and issuer_abn when it is made,
+--  the same way a line item snapshots its rate.
+-- ---------------------------------------------------------------------
+create or replace function awesome.update_issuer(
+  p_org_id    uuid,
+  p_issuer_id uuid,
+  p_full_name text,
+  p_abn       text,
+  p_acn       text default null
+)
+returns awesome.issuers
+language plpgsql security definer
+set search_path to 'awesome', 'pg_catalog'
+as $$
+declare
+  v_issuer awesome.issuers;
+  v_abn    text := awesome.digits(p_abn);
+  v_acn    text := nullif(awesome.digits(p_acn), '');
+  v_name   text := btrim(coalesce(p_full_name, ''));
+begin
+  if p_org_id is null then
+    raise exception 'update_issuer: p_org_id is required';
+  end if;
+  if v_name = '' then
+    raise exception 'update_issuer: the name on the ABN is required';
+  end if;
+  if length(v_abn) <> 11 then
+    raise exception 'update_issuer: an ABN is eleven digits';
+  end if;
+  if v_acn is not null and length(v_acn) <> 9 then
+    raise exception 'update_issuer: an ACN is nine digits';
+  end if;
+
+  update awesome.issuers i
+     set full_name  = v_name,
+         short_name = left(v_name, 20),
+         abn        = v_abn,
+         acn        = v_acn
+   where i.id = p_issuer_id
+     and i.org_id = p_org_id
+  returning * into v_issuer;
+
+  if not found then
+    raise exception 'update_issuer: no such entity in this business';
+  end if;
+
+  return v_issuer;
 end;
 $$;
 
@@ -540,6 +654,7 @@ declare
   v_issuer  awesome.issuers;
   v_invoice awesome.invoices;
   v_number  integer;
+  v_default text;
 begin
   if p_created_by is null or btrim(p_created_by) = '' then
     raise exception 'create_invoice: p_created_by is required (agent signature)';
@@ -567,6 +682,20 @@ begin
     raise exception 'create_invoice: issuer % not found', p_issuer_id;
   end if;
 
+  -- A blank line falls back to what this business always sells. If it does not
+  -- always sell the same thing, a line that says nothing is an error rather
+  -- than something to guess at.
+  select nullif(btrim(coalesce(o.default_service_description, '')), '')
+    into v_default
+    from awesome.orgs o where o.id = p_org_id;
+
+  if v_default is null and exists (
+    select 1 from jsonb_array_elements(p_items) e
+    where nullif(btrim(coalesce(e->>'description', '')), '') is null
+  ) then
+    raise exception 'create_invoice: every line item needs a description';
+  end if;
+
   -- Take the next number and advance the counter in one statement. The row
   -- lock is per business, so two businesses never wait on each other and
   -- neither can be handed the same number twice.
@@ -580,13 +709,13 @@ begin
 
   insert into awesome.invoices (
     org_id, invoice_number,
-    issuer_id, issuer_name, issuer_abn,
+    issuer_id, issuer_name, issuer_abn, issuer_acn,
     client_id, bill_to_name, bill_to_address_line,
     bill_to_suburb, bill_to_state, bill_to_postcode,
     invoice_date, internal_notes, created_by
   ) values (
     p_org_id, v_number,
-    v_issuer.id, v_issuer.full_name, v_issuer.abn,
+    v_issuer.id, v_issuer.full_name, v_issuer.abn, v_issuer.acn,
     v_client.id, v_client.name, v_client.address_line,
     v_client.suburb, v_client.state, v_client.postcode,
     p_invoice_date, p_internal_notes, p_created_by
@@ -597,7 +726,7 @@ begin
     (invoice_id, description, service_date, quantity, rate, sort_order)
   select
     v_invoice.id,
-    coalesce(nullif(btrim(it->>'description'), ''), 'Cleaning Service'),
+    coalesce(nullif(btrim(it->>'description'), ''), v_default),
     nullif(it->>'service_date', '')::date,
     coalesce(nullif(it->>'quantity', '')::numeric, 1),
     (it->>'rate')::numeric,
@@ -626,6 +755,7 @@ declare
   v_client  awesome.clients;
   v_issuer  awesome.issuers;
   v_invoice awesome.invoices;
+  v_default text;
 begin
   if p_items is null or jsonb_typeof(p_items) <> 'array'
      or jsonb_array_length(p_items) = 0 then
@@ -656,6 +786,17 @@ begin
     raise exception 'update_invoice: issuer % not found', p_issuer_id;
   end if;
 
+  select nullif(btrim(coalesce(o.default_service_description, '')), '')
+    into v_default
+    from awesome.orgs o where o.id = p_org_id;
+
+  if v_default is null and exists (
+    select 1 from jsonb_array_elements(p_items) e
+    where nullif(btrim(coalesce(e->>'description', '')), '') is null
+  ) then
+    raise exception 'update_invoice: every line item needs a description';
+  end if;
+
   update awesome.invoices set
     issuer_id            = v_issuer.id,
     issuer_name          = v_issuer.full_name,
@@ -676,7 +817,7 @@ begin
     (invoice_id, description, service_date, quantity, rate, sort_order)
   select
     p_id,
-    coalesce(nullif(btrim(it->>'description'), ''), 'Cleaning Service'),
+    coalesce(nullif(btrim(it->>'description'), ''), v_default),
     nullif(it->>'service_date', '')::date,
     coalesce(nullif(it->>'quantity', '')::numeric, 1),
     (it->>'rate')::numeric,
@@ -1050,21 +1191,64 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------
---  Trial businesses are deleted after a month of silence.
+--  Closing a trial account on purpose.
 --
---  Activity is DERIVED rather than tracked. Trusting a "last seen" column
---  alone would delete a business that stays signed in and works here every
---  day, since such a column only moves on sign-in. Writing a heartbeat on
---  every page render would fix that and cost a database write per page view,
---  for a fact the data already knows.
+--  The same deletion as the purge below, asked for by the person who owns the
+--  account instead of by the calendar. is_demo is checked in here rather than
+--  by the caller: this is the one function in the schema whose whole job is to
+--  destroy a business, and the fence that keeps it away from Awesome belongs
+--  where it cannot be forgotten.
+-- ---------------------------------------------------------------------
+create or replace function awesome.delete_demo_org(p_org_id uuid)
+returns text
+language plpgsql security definer
+set search_path to 'awesome', 'pg_catalog'
+as $$
+declare v_name text;
+begin
+  select o.name into v_name
+    from awesome.orgs o
+   where o.id = p_org_id and o.is_demo
+     for update;
+  if not found then
+    raise exception 'delete_demo_org: % is not a trial business', p_org_id;
+  end if;
+
+  delete from awesome.invoice_items where org_id = p_org_id;
+  delete from awesome.invoices     where org_id = p_org_id;
+  delete from awesome.clients      where org_id = p_org_id;
+  delete from awesome.issuers      where org_id = p_org_id;
+  delete from awesome.agent_keys   where org_id = p_org_id;
+  delete from awesome.org_members  where org_id = p_org_id;
+  delete from awesome.orgs         where id     = p_org_id;
+
+  return v_name;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+--  Trial businesses are deleted a month after they are created, used or not.
+--
+--  Activity is deliberately NOT part of the rule. These accounts exist so
+--  people can try the app, and a busy one kept alive forever would mean this
+--  database holding somebody's real clients and invoices forever. One month
+--  from sign-up is also the only rule that fits in one sentence on a banner,
+--  which matters more than cleverness when the outcome is deletion.
 --
 --  The deletes are explicit and ordered rather than left to ON DELETE CASCADE:
 --  cascading from `orgs` fans out to clients, issuers and invoices at once,
 --  and the invoice -> client and invoice -> issuer foreign keys have no
 --  cascade of their own, so the order it happened to pick could fail.
+--
+--  p_org_id aims the purge at a single business. Left null it considers every
+--  trial that qualifies, which is what the daily cron wants. It exists because
+--  a test that calls this function unaimed deletes real accounts, and one did.
 -- ---------------------------------------------------------------------
-create or replace function awesome.purge_stale_demo_orgs(p_days integer default 30)
-returns table(purged_org_id uuid, purged_name text)
+create or replace function awesome.purge_stale_demo_orgs(
+  p_days   integer default 30,
+  p_org_id uuid    default null
+)
+returns table(purged_org_id uuid, purged_name text, purged_logo_path text)
 language plpgsql security definer
 set search_path to 'awesome', 'pg_catalog'
 as $$
@@ -1073,18 +1257,14 @@ declare
 begin
   return query
   with doomed as (
-    select o.id, o.name
+    select o.id, o.name, o.logo_path
       from awesome.orgs o
+     -- Age since sign-up, not activity. A trial exists so somebody can try the
+     -- app, not so the app can hold their data: a busy trial kept alive forever
+     -- would mean keeping somebody's clients and invoices forever.
      where o.is_demo
-       and greatest(
-             o.last_active_at,
-             o.updated_at,
-             o.created_at,
-             coalesce((select max(i.updated_at) from awesome.invoices i where i.org_id = o.id),
-                      '-infinity'::timestamptz),
-             coalesce((select max(k.last_used_at) from awesome.agent_keys k where k.org_id = o.id),
-                      '-infinity'::timestamptz)
-           ) < v_cutoff
+       and o.created_at < v_cutoff
+       and (p_org_id is null or o.id = p_org_id)
   ),
   del_items as (
     delete from awesome.invoice_items i where i.org_id in (select id from doomed) returning 1
@@ -1105,9 +1285,11 @@ begin
     delete from awesome.org_members m where m.org_id in (select id from doomed) returning 1
   ),
   del_orgs as (
-    delete from awesome.orgs o where o.id in (select id from doomed) returning o.id, o.name
+    delete from awesome.orgs o
+     where o.id in (select id from doomed)
+    returning o.id, o.name, o.logo_path
   )
-  select d.id, d.name from del_orgs d;
+  select d.id, d.name, d.logo_path from del_orgs d;
 end;
 $$;
 

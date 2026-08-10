@@ -27,7 +27,9 @@ export async function createInvoiceAction(
 
   const items = payload.items
     .map((it) => ({
-      description: it.description?.trim() || "Cleaning Service",
+      // Blank is passed through: the database fills it with the business's own
+      // usual service, or refuses the line if it has none.
+      description: it.description?.trim() ?? "",
       service_date: it.service_date || null,
       quantity: Number(it.quantity) || 0,
       rate: Number(it.rate) || 0,

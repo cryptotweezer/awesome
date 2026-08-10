@@ -37,7 +37,7 @@ async function createOrg(overrides = {}) {
     p_display_name: "Test Owner",
     p_name: "Bright Clean Pty Ltd",
     p_issuer_name: "Bright Clean Pty Ltd",
-    p_tax_id: `9${userId.replace(/\D/g, "").slice(0, 10)}`,
+    p_tax_id: `9${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
     p_tax_id_label: "ABN",
     p_entity_type: "company",
     p_terms_days: 21,

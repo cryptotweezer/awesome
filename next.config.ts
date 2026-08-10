@@ -10,6 +10,14 @@ const nextConfig: NextConfig = {
   // artefacts are meant to be handled.
   serverExternalPackages: ["@arcjet/next", "arcjet", "@arcjet/analyze-wasm"],
 
+  experimental: {
+    // A logo may be up to 1 MB (the bucket says so), and it is posted together
+    // with the whole business form when somebody signs up. The default limit
+    // for a Server Action body is exactly 1 MB, which would reject that
+    // request as a whole rather than just the file.
+    serverActions: { bodySizeLimit: "3mb" },
+  },
+
   // These routes read files off disk at request time, so the files have to
   // survive the Vercel build and land in the serverless bundle.
   outputFileTracingIncludes: {

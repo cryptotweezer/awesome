@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
+import { appBaseUrl } from "@/lib/app-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Step, AgentKit, CopyBlock } from "./guide-client";
 
@@ -16,7 +16,7 @@ import { Step, AgentKit, CopyBlock } from "./guide-client";
  * being told as one story, so the page tells them as three.
  */
 export default async function GuidePage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const db = createAdminClient();
   const head = { count: "exact" as const, head: true };
 
@@ -26,11 +26,7 @@ export default async function GuidePage() {
     db.from("agent_keys").select("*", head).eq("org_id", org.id),
   ]);
 
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto =
-    h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const baseUrl = `${proto}://${host}`;
+  const baseUrl = await appBaseUrl();
 
   const done = (org.onboarding ?? {}) as Record<string, boolean>;
   const hasClients = (clients.count ?? 0) > 0;
@@ -65,8 +61,8 @@ export default async function GuidePage() {
 
         <Step n={2} title="Add a client" done={hasClients}>
           <p>
-            A client holds an address and an agreed rate, so invoicing them
-            later is two clicks.{" "}
+            A client is a name and an address, which is all it takes to invoice
+            somebody.{" "}
             <Link href="/clients" className="underline">
               Add your first client
             </Link>
@@ -91,8 +87,8 @@ export default async function GuidePage() {
       >
         <Step n={4} title="Create your key and download your kit" done={hasKeys}>
           <p>
-            The kit is a folder that teaches your assistant how your business
-            works, with the connection details already filled in. One key per
+            The kit is a folder that teaches your AI assistant how your business
+            works, with the connection details already filled in. One key per AI
             assistant, revocable at any time from{" "}
             <Link href="/agent-keys" className="underline">
               Agent keys
@@ -169,7 +165,7 @@ export default async function GuidePage() {
             <li>
               Clone{" "}
               <a
-                href="https://github.com/andreshenao/awesome"
+                href="https://github.com/cryptotweezer/awesome"
                 className="underline"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -192,7 +188,8 @@ export default async function GuidePage() {
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ALLOWED_EMAILS=you@example.com
-AGENT_KEY_PEPPER=<any long random string>`}
+AGENT_KEY_PEPPER=<any long random string>
+APP_URL=https://your-own-domain`}
           />
           <p>
             On your own copy there are no trial limits, nothing is deleted after
@@ -204,9 +201,9 @@ AGENT_KEY_PEPPER=<any long random string>`}
       {org.is_demo && (
         <p className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900/50 dark:text-slate-400 dark:ring-slate-800">
           This is a trial account: up to {org.max_invoices} invoices and{" "}
-          {org.max_clients} clients, and it is deleted after 30 days without
-          use. Export whenever you like, and install your own copy when you are
-          ready to bill for real.
+          {org.max_clients} clients, and it is deleted 30 days after you signed
+          up whether you used it or not. Export whenever you like, and install
+          your own copy when you are ready to bill for real.
         </p>
       )}
     </div>

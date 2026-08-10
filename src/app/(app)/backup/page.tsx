@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireOrg } from "@/lib/data/org";
+import { orgForPage } from "@/lib/data/org";
 
 async function getCounts(orgId: string) {
   const s = createAdminClient();
@@ -17,7 +17,7 @@ async function getCounts(orgId: string) {
 }
 
 export default async function BackupPage() {
-  const { org } = await requireOrg();
+  const org = await orgForPage();
   const counts = await getCounts(org.id);
 
   return (
