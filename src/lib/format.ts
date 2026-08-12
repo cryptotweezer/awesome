@@ -40,7 +40,7 @@ export function todayInSydney(now: Date = new Date()): string {
 }
 
 export function formatAUD(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined) return "—";
+  if (amount === null || amount === undefined) return "-";
   return `AUD ${amount.toFixed(2)}`;
 }
 
@@ -61,7 +61,7 @@ const MONTHS = [
 
 /** "2026-07-23" -> "23 Jul 2026" */
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const [y, m, d] = iso.split("T")[0].split("-").map(Number);
   if (!y || !m || !d) return iso;
   return `${d} ${MONTHS[m - 1]} ${y}`;

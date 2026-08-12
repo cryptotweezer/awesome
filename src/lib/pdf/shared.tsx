@@ -16,7 +16,7 @@ export const DANGER = "#b91c1c";
 
 /** "$120.00" — printed money, distinct from the dashboard's `formatAUD`. */
 export function money(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
+  if (n === null || n === undefined) return "-";
   return `$${Number(n).toFixed(2)}`;
 }
 

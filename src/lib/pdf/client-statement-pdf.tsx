@@ -86,7 +86,7 @@ export function ClientStatementDocument({
 
   return (
     <Document
-      title={`Statement — ${client.name}`}
+      title={`Statement for ${client.name}`}
       author={company.business_name}
     >
       <Page size="A4" style={base.page}>

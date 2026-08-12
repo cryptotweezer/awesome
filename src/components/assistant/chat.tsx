@@ -269,8 +269,8 @@ export function Chat({
         {left !== null ? (
           <p className="text-xs text-slate-400 dark:text-slate-500">
             {left > 0
-              ? `${left} assistant ${left === 1 ? "message" : "messages"} left on this trial account. Clearing the conversation does not give any back. Connecting your own AI removes the limit.`
-              : "You have used the assistant messages that come with a trial account. Connect your own AI from the setup guide to keep going."}
+              ? `${left} ${left === 1 ? "message" : "messages"} left for this built-in assistant, which runs on the app's own AI account. Your own AI, connected from the setup guide, has no limit here. Clearing the conversation does not give any back.`
+              : "You have used the messages that come with this built-in assistant, which runs on the app's own AI account. Your own AI has no limit: connect it from the setup guide and keep going."}
           </p>
         ) : (
           <span />

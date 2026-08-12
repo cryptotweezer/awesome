@@ -682,10 +682,13 @@ begin
     raise exception 'create_invoice: issuer % not found', p_issuer_id;
   end if;
 
-  -- A blank line falls back to what this business always sells. If it does not
-  -- always sell the same thing, a line that says nothing is an error rather
-  -- than something to guess at.
-  select nullif(btrim(coalesce(o.default_service_description, '')), '')
+  -- A blank line falls back to the work normally done for THIS client, then to
+  -- what the business always sells. With neither, a line that says nothing is
+  -- an error rather than something to guess at.
+  select coalesce(
+           nullif(btrim(coalesce(v_client.default_description, '')), ''),
+           nullif(btrim(coalesce(o.default_service_description, '')), '')
+         )
     into v_default
     from awesome.orgs o where o.id = p_org_id;
 
@@ -693,7 +696,7 @@ begin
     select 1 from jsonb_array_elements(p_items) e
     where nullif(btrim(coalesce(e->>'description', '')), '') is null
   ) then
-    raise exception 'create_invoice: every line item needs a description';
+    raise exception 'create_invoice: every line item needs a description saying what the work was';
   end if;
 
   -- Take the next number and advance the counter in one statement. The row
@@ -786,7 +789,10 @@ begin
     raise exception 'update_invoice: issuer % not found', p_issuer_id;
   end if;
 
-  select nullif(btrim(coalesce(o.default_service_description, '')), '')
+  select coalesce(
+           nullif(btrim(coalesce(v_client.default_description, '')), ''),
+           nullif(btrim(coalesce(o.default_service_description, '')), '')
+         )
     into v_default
     from awesome.orgs o where o.id = p_org_id;
 
@@ -794,7 +800,7 @@ begin
     select 1 from jsonb_array_elements(p_items) e
     where nullif(btrim(coalesce(e->>'description', '')), '') is null
   ) then
-    raise exception 'update_invoice: every line item needs a description';
+    raise exception 'update_invoice: every line item needs a description saying what the work was';
   end if;
 
   update awesome.invoices set

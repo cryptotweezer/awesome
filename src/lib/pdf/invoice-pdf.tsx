@@ -113,7 +113,7 @@ export function InvoiceDocument({
 
   return (
     <Document
-      title={`${withGst ? "Tax invoice" : "Invoice"} ${invoice.invoice_number} — ${invoice.bill_to_name}`}
+      title={`${withGst ? "Tax invoice" : "Invoice"} ${invoice.invoice_number} for ${invoice.bill_to_name}`}
       author={company.business_name}
     >
       <Page size="A4" style={base.page}>

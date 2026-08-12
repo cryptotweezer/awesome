@@ -10,15 +10,24 @@ import { todayInTimezone } from "@/lib/format";
 import { InvoiceDocument } from "@/lib/pdf/invoice-pdf";
 import { ClientStatementDocument } from "@/lib/pdf/client-statement-pdf";
 import { FyStatementDocument } from "@/lib/pdf/fy-statement-pdf";
+import type { DocRef } from "./download";
 import type { Client, Issuer } from "@/lib/types";
 
-export type Pdf = { filename: string; pdf_base64: string };
+/** A document as bytes, before anybody decides how to hand it over. */
+export type RenderedDoc = { filename: string; buffer: Uint8Array };
+export type Pdf = { filename: string; size_bytes: number; pdf_base64: string };
 
 function slug(s: string): string {
   return s.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
 }
-function toBase64(buffer: Uint8Array): string {
-  return Buffer.from(buffer).toString("base64");
+
+/** The base64 form, for the tools that hand an agent the bytes to attach. */
+export function toPdf({ filename, buffer }: RenderedDoc): Pdf {
+  return {
+    filename,
+    size_bytes: buffer.byteLength,
+    pdf_base64: Buffer.from(buffer).toString("base64"),
+  };
 }
 
 /** Join invoice numbers as "1954", "1954 and 1955", "1954, 1955 and 1956". */
@@ -124,10 +133,10 @@ async function loadOrg(orgId: string) {
   return org;
 }
 
-export async function renderInvoicePdf(
+export async function renderInvoiceDoc(
   orgId: string,
   ref: string,
-): Promise<Pdf> {
+): Promise<RenderedDoc> {
   const [invoice, org] = await Promise.all([
     getInvoiceByRef(orgId, ref),
     loadOrg(orgId),
@@ -144,14 +153,14 @@ export async function renderInvoicePdf(
   );
   return {
     filename: `Invoice-${invoice.invoice_number}-${slug(invoice.bill_to_name)}.pdf`,
-    pdf_base64: toBase64(buffer),
+    buffer,
   };
 }
 
-export async function renderClientStatementPdf(
+export async function renderClientStatementDoc(
   orgId: string,
   clientId: string,
-): Promise<Pdf> {
+): Promise<RenderedDoc> {
   const org = await loadOrg(orgId);
   const statement = await getClientStatement(org, clientId);
   const company = companyProfileFromOrg(org);
@@ -165,15 +174,15 @@ export async function renderClientStatementPdf(
   );
   return {
     filename: `Statement-${slug(statement.client.name)}-${statement.statementDate}.pdf`,
-    pdf_base64: toBase64(buffer),
+    buffer,
   };
 }
 
-export async function renderTaxStatementPdf(
+export async function renderTaxStatementDoc(
   orgId: string,
   issuerId: string,
   fyStart?: string | null,
-): Promise<Pdf> {
+): Promise<RenderedDoc> {
   const org = await loadOrg(orgId);
   const start =
     fyStart ||
@@ -190,9 +199,41 @@ export async function renderTaxStatementPdf(
     />,
   );
   return {
-    filename: `Invoices-${statement.fyLabel.replace(/\s/g, "-")}-${statement.issuer.short_name}.pdf`,
-    pdf_base64: toBase64(buffer),
+    // Slugged like every other filename: the issuer's own name is the one
+    // place a space used to survive into "Invoices-FY-2026-27-Pitsypet PTY.pdf".
+    filename: `Invoices-${statement.fyLabel.replace(/\s/g, "-")}-${slug(statement.issuer.short_name)}.pdf`,
+    buffer,
   };
+}
+
+/**
+ * Render whatever a download token points at. The token is the only caller:
+ * it already fixed the organisation and the document when it was signed, so
+ * there is nothing here to be talked into fetching something else.
+ */
+export async function renderDoc(
+  orgId: string,
+  doc: DocRef,
+): Promise<RenderedDoc> {
+  switch (doc.kind) {
+    case "invoice":
+      return renderInvoiceDoc(orgId, doc.ref);
+    case "client_statement":
+      return renderClientStatementDoc(orgId, doc.ref);
+    case "tax_statement":
+      return renderTaxStatementDoc(orgId, doc.ref, doc.fyStart);
+  }
+}
+
+export async function renderInvoicePdf(orgId: string, ref: string): Promise<Pdf> {
+  return toPdf(await renderInvoiceDoc(orgId, ref));
+}
+
+export async function renderClientStatementPdf(
+  orgId: string,
+  clientId: string,
+): Promise<Pdf> {
+  return toPdf(await renderClientStatementDoc(orgId, clientId));
 }
 
 // -- prepare_client_email ---------------------------------------------------

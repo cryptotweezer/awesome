@@ -49,7 +49,7 @@ export function FyStatementPicker({
           >
             {issuers.map((i) => (
               <option key={i.id} value={i.id}>
-                {i.short_name} — {i.abn}
+                {i.short_name} ({i.abn})
               </option>
             ))}
           </select>

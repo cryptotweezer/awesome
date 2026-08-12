@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Awesome Services — Billing",
+  title: "Awesome Services Billing",
   description: "Internal billing & invoicing dashboard for Awesome Services.",
 };
 

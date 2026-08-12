@@ -177,7 +177,7 @@ export function InvoiceForm({
             onChange={(e) => onClientChange(e.target.value)}
             className="input"
           >
-            <option value="">— select a client —</option>
+            <option value="">Select a client</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -208,7 +208,7 @@ export function InvoiceForm({
               onChange={(e) => setIssuerId(e.target.value)}
               className="input"
             >
-              <option value="">— select —</option>
+              <option value="">Select</option>
               {issuers.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.short_name} ({i.abn})

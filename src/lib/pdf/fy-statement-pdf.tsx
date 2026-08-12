@@ -84,7 +84,7 @@ export function FyStatementDocument({
 
   return (
     <Document
-      title={`Invoices ${statement.fyLabel} — ${issuer.short_name}`}
+      title={`Invoices ${statement.fyLabel} (${issuer.short_name})`}
       author={company.business_name}
     >
       <Page size="A4" style={s.page}>
@@ -98,9 +98,9 @@ export function FyStatementDocument({
 
         <View style={s.midRow}>
           <View>
-            <Text style={s.title}>Invoices issued — {statement.fyLabel}</Text>
+            <Text style={s.title}>Invoices issued in {statement.fyLabel}</Text>
             <Text style={s.period}>
-              Australian financial year: {formatDate(statement.fyStart)} —{" "}
+              Australian financial year: {formatDate(statement.fyStart)} to{" "}
               {formatDate(statement.fyEnd)}
             </Text>
             <Text style={s.period}>
@@ -151,7 +151,7 @@ export function FyStatementDocument({
                   {r.bill_to_name}
                 </Text>
                 <Text style={[s.colSuburb, s.muted]}>
-                  {r.bill_to_suburb ?? "—"}
+                  {r.bill_to_suburb ?? ""}
                 </Text>
                 <Text style={[s.colInvDate, s.muted]}>
                   {formatDate(r.invoice_date)}
@@ -165,7 +165,7 @@ export function FyStatementDocument({
                 </Text>
                 {/* Cancelled invoices carry no value into the total. */}
                 <Text style={[s.colTotal, ...(tone ? [tone] : [])]}>
-                  {isCancelled ? "—" : money(r.total)}
+                  {isCancelled ? "-" : money(r.total)}
                 </Text>
                 <Text style={[s.colStatus, s.muted]}>{r.status}</Text>
               </View>

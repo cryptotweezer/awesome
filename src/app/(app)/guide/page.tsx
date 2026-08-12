@@ -111,6 +111,11 @@ export default async function GuidePage() {
             Desktop and Codex.
           </p>
           <p>
+            <strong>Then restart your assistant.</strong> Most of them read
+            their list of tools once when they start, so a chat you already had
+            open will say it is connected and still have nothing to call.
+          </p>
+          <p>
             Anything that speaks MCP over HTTP works. The address is always the
             same:
           </p>

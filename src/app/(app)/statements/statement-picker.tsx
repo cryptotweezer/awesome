@@ -21,7 +21,7 @@ export function ClientStatementPicker({
   if (targets.length === 0) {
     return (
       <p className="text-sm text-slate-400 dark:text-slate-500">
-        🎉 Nothing outstanding — there is no one to remind.
+        🎉 Nothing outstanding, there is no one to remind.
       </p>
     );
   }

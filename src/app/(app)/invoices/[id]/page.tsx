@@ -162,13 +162,13 @@ export default async function InvoiceDetailPage({
           <p className="text-slate-600 dark:text-slate-400">
             Created by:{" "}
             <span className="font-medium text-slate-900 dark:text-slate-100">
-              {inv.created_by ?? "—"}
+              {inv.created_by ?? "-"}
             </span>
           </p>
           <p className="text-slate-600 dark:text-slate-400">
             Notes:{" "}
             <span className="font-medium text-slate-900 dark:text-slate-100">
-              {inv.internal_notes ?? "—"}
+              {inv.internal_notes ?? "-"}
             </span>
           </p>
         </div>

@@ -33,6 +33,38 @@ export function skillFolderName(org: Org): string {
   return `${slug(org.display_name ?? org.name)}-billing`;
 }
 
+/**
+ * What the MCP connection is called in the person's assistant.
+ *
+ * Named after the business, not after this app. Every kit used to say
+ * "awesome", so a bookkeeper with two clients could not install the second kit
+ * without overwriting the first, and the tools of one business would answer
+ * for the other.
+ */
+export function mcpServerName(org: Org): string {
+  return slug(org.display_name ?? org.name);
+}
+
+/** The trial ceilings, said plainly, or nothing when the account has none. */
+function limitsSection(org: Org): string {
+  if (!org.is_demo) return "";
+  const caps = [
+    org.max_clients ? `**${org.max_clients} clients**` : null,
+    org.max_invoices ? `**${org.max_invoices} invoices**` : null,
+  ].filter(Boolean);
+  if (caps.length === 0) return "";
+  return `
+## What this account can hold
+
+It is a trial, so it stops at ${caps.join(" and ")}. Past that the app refuses
+the write and says so; nothing breaks, and deleting something frees the space
+again. There is no limit on how much you and I talk: the allowance the
+dashboard mentions is for the little assistant built into the web app, which
+runs on the app owner's account. You are the user's own AI, and every call you
+make here is free of that.
+`;
+}
+
 function skillMd({ org, issuer }: SkillContext): string {
   return `---
 name: ${skillFolderName(org)}
@@ -56,8 +88,8 @@ data: the key you are configured with belongs to this business alone.
   }
 - Payment terms: **${org.terms_days} days** from the invoice date
 - Time zone: **${org.timezone}**
-- Currency: AUD
-
+- Currency: AUD${org.gst_registered ? "\n- Registered for GST. Prices INCLUDE it, so the tax is already inside every total, never added on top." : ""}
+${limitsSection(org)}
 ## Rules that are not yours to bend
 
 1. **Deleting an invoice always needs the user's confirmation first.** Every
@@ -77,50 +109,84 @@ data: the key you are configured with belongs to this business alone.
 ## The tools
 
 **Getting your bearings**
-- \`today\` — today's date in this business's time zone, plus the last 14 days
+- \`today\`: today's date in this business's time zone, plus the last 14 days
   with weekday names. Use it before interpreting "yesterday" or "last Tuesday".
-- \`business_snapshot\` — outstanding, overdue, billed this month / this
+- \`business_snapshot\`: outstanding, overdue, billed this month / this
   financial year / all time, and paid all time. One call, the whole picture.
 
 **Questions about money**
-- \`who_owes\` — every client with an unpaid balance.
-- \`overdue_invoices\` — everything past its due date.
-- \`client_summary\` — one client's billed, paid, outstanding and last invoice.
-- \`client_account\` — that client's unpaid invoices, one row each.
-- \`billed_in_period\` — totals between two dates.
-- \`fy_summary\` — billed and paid for a financial year.
+- \`who_owes\`: every client with an unpaid balance.
+- \`overdue_invoices\`: everything past its due date.
+- \`client_summary\`: one client's billed, paid, outstanding and last invoice.
+- \`client_account\`: that client's unpaid invoices, one row each.
+- \`billed_in_period\`: totals between two dates.
+- \`fy_summary\`: billed and paid for a financial year.
+- \`gst_position\`: GST collected this BAS quarter and this year, on a cash
+  basis. The only place a GST figure comes from.
 
 **Finding things**
-- \`find_invoices\` — search by client, status, or date range.
-- \`recent_invoices\` — the latest ones, optionally for one client.
-- \`get_invoice\` — one invoice with its line items.
-- \`list_clients\` — every client and their agreed rate.
+- \`find_invoices\`: search by client, status, or date range.
+- \`recent_invoices\`: the latest ones, optionally for one client.
+- \`get_invoice\`: one invoice with its line items.
+- \`list_clients\`: every client, their address and their agreed rate.
+- \`list_issuers\`: the ${org.tax_id_label}s this business invoices under. You
+  will rarely need it; see "Creating an invoice" below.
 
 **Changing things**
-- \`create_invoice\` — needs \`client_id\`, \`issuer_id\` and \`items\`. Each item
-  is \`{service_date, rate, description?, quantity?}\`. Take \`issuer_id\` and the
-  rate from \`list_clients\`.
-- \`update_invoice\` — REPLACES the whole item list, so send all of them.
+- \`create_invoice\`: see below.
+- \`update_invoice\`: REPLACES the whole item list, so send every line, not
+  just the changed one. Anything you leave out (client, date, notes) keeps
+  what the invoice already has.
 - \`mark_paid\`, \`mark_unpaid\`, \`cancel_invoice\`, \`reactivate_invoice\`.
-- \`delete_invoice\` — needs \`confirm: true\`, and only after the user has said so.
+- \`delete_invoice\`: needs \`confirm: true\`, and only after the user has said so.
 - \`create_client\`, \`update_client\`.
 
-**Documents and email**
-- \`get_invoice_pdf\`, \`get_client_statement\`, \`get_tax_statement\` — the PDF
-  comes back as base64 for you to attach or forward.
-- \`prepare_client_email\` — recipient, filled-in message and the invoice PDFs,
+**Documents**
+- \`get_invoice_pdf\`, \`get_client_statement\`, \`get_tax_statement\`.
+- \`prepare_client_email\`: recipient, filled-in message and the invoice PDFs,
   ready to send with your own email tool. This app never sends anything itself.
-- \`prepare_client_statement_email\` — the same for an account statement.
+- \`prepare_client_statement_email\`: the same for an account statement.
 
 **Housekeeping**
-- \`create_backup\` — the whole business as a JSON file, base64.
+- \`create_backup\`: the whole business as a JSON file, base64.
+
+## Creating an invoice
+
+\`\`\`json
+{ "client": "Newtown Pet Supplies",
+  "items": [{ "service_date": "2026-08-10", "rate": 320,
+              "description": "Store fit-out deep clean" }] }
+\`\`\`
+
+That is the whole thing. Name the client the way the user does; you do not need
+to look up an id first. The ${org.tax_id_label} billing is worked out for you,
+and \`invoice_date\` defaults to today here, which is usually right: the service
+date is the day the work happened, the invoice date is the day you bill it.
+
+Use the client's \`default_rate\` unless the user says otherwise. If the client
+has a usual service agreed, the description can be left out; otherwise say what
+the work was.
+
+## Handing over a PDF
+
+The three document tools answer with a **download link** that works for 30
+minutes, plus the filename and the size. They do not dump the file into our
+conversation, because a PDF is about 60,000 characters of base64 and most
+assistants refuse a result that big.
+
+So: if you can write files, fetch the link and save it to the user's Downloads
+folder, then tell them the path. If you cannot, give them the link. Only pass
+\`include_base64: true\` when you genuinely need the bytes in hand, for example
+to attach the file to an email yourself.
+
+Statements are of what is still **unpaid**, so fetch one before marking an
+invoice paid, not after.
 
 ## How to work
 
-Look before you write. \`list_clients\` gives you the client id, the issuer id
-and the agreed rate in one call, which is everything \`create_invoice\` needs.
-When something is ambiguous, ask instead of guessing: a wrong invoice is more
-work to undo than a question is to answer.
+Look before you write. \`list_clients\` gives you every client, their address
+and their agreed rate in one call. When something is ambiguous, ask instead of
+guessing: a wrong invoice is more work to undo than a question is to answer.
 `;
 }
 
@@ -142,6 +208,13 @@ to an assistant.
 Both take the same key, either as \`Authorization: Bearer <key>\` or as
 \`x-api-key: <key>\`.
 
+## Document links
+
+The PDF tools answer with a link to \`${baseUrl}/api/agent/download/...\`.
+It carries its own signed token, so it opens in a browser with no key and no
+login, and it stops working after 30 minutes. Nothing is stored: opening it
+renders the document again from live data.
+
 ## What the key can and cannot do
 
 It can call the tools listed in SKILL.md, on **${org.name}** and nothing else.
@@ -161,6 +234,8 @@ A JSON object with your totals means everything is wired up.
 
 function installMd(ctx: SkillContext): string {
   const folder = skillFolderName(ctx.org);
+  const server = mcpServerName(ctx.org);
+  const envVar = `${server.toUpperCase().replace(/-/g, "_")}_KEY`;
   return `# Installing this
 
 Two things go into your assistant: the **skill** (the folder in this zip, which
@@ -172,10 +247,13 @@ assistant configure itself. If you would rather do it by hand:
 
 ## Claude Code
 
-    claude mcp add --transport http awesome ${ctx.baseUrl}/api/mcp \\
+    claude mcp add --transport http ${server} ${ctx.baseUrl}/api/mcp \\
       --header "Authorization: Bearer ${ctx.key}" --scope user
 
 Then copy the \`${folder}\` folder into \`~/.claude/skills/\`.
+
+**Restart Claude Code afterwards.** A session that is already open loaded its
+list of tools when it started and will not see the new ones until it does.
 
 ## Claude Desktop
 
@@ -184,7 +262,7 @@ Edit \`claude_desktop_config.json\` and add:
 ${"```"}json
 {
   "mcpServers": {
-    "awesome": {
+    "${server}": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "${ctx.baseUrl}/api/mcp", "--header", "Authorization:\${AUTH_HEADER}"],
       "env": { "AUTH_HEADER": "Bearer ${ctx.key}" }
@@ -200,13 +278,13 @@ Restart Claude Desktop, then upload the skill folder from its settings.
 In \`~/.codex/config.toml\`:
 
 ${"```"}toml
-[mcp_servers.awesome]
+[mcp_servers.${server.replace(/-/g, "_")}]
 url = "${ctx.baseUrl}/api/mcp"
-bearer_token_env_var = "AWESOME_BILLING_AGENT_KEY"
+bearer_token_env_var = "${envVar}"
 ${"```"}
 
-Set \`AWESOME_BILLING_AGENT_KEY\` to your key in your environment, then copy the
-\`${folder}\` folder into \`~/.codex/skills/\`.
+Set \`${envVar}\` to your key in your environment, then copy the \`${folder}\`
+folder into \`~/.codex/skills/\`. Restart Codex afterwards.
 
 ## Anything else
 
@@ -216,9 +294,21 @@ the SKILL.md file as instructions.
 
 ---
 
-**This zip contains your key.** Treat it like a password: do not email it, do
-not commit it to a repository. If it gets out, revoke it on the Agent keys page
-and generate a new one, which takes a few seconds.
+## About the key in this file
+
+This zip was built with your key already filled in, so that installing is one
+copy and paste. The cost of that convenience is that **the key is written in
+plain text in this file**, and if you copy the whole folder into your skills
+directory, it stays there for any assistant to read.
+
+For trying the app out, that is fine, and you can revoke the key from the Agent
+keys page at any time. Before you rely on this for anything real:
+
+1. Delete this \`INSTALL.md\` once you have installed. The skill does not need it.
+2. Keep the key out of the skill folder. Put it in an environment variable and
+   point the MCP config at the variable, the way the Codex example above does.
+3. Treat it like a password: do not email it, do not commit it to a repository.
+   If it gets out, revoke it and mint a new one, which takes a few seconds.
 `;
 }
 
@@ -226,7 +316,7 @@ function mcpConfigJson(ctx: SkillContext): string {
   return `${JSON.stringify(
     {
       mcpServers: {
-        awesome: {
+        [mcpServerName(ctx.org)]: {
           type: "http",
           url: `${ctx.baseUrl}/api/mcp`,
           headers: { Authorization: `Bearer ${ctx.key}` },
@@ -255,6 +345,7 @@ export function buildSkillFiles(ctx: SkillContext): Record<string, string> {
  */
 export function buildInstallPrompt(ctx: SkillContext): string {
   const { org, baseUrl, key } = ctx;
+  const server = mcpServerName(org);
   return `Connect yourself to my billing system.
 
 It is an MCP server over HTTP:
@@ -262,10 +353,13 @@ It is an MCP server over HTTP:
   URL:    ${baseUrl}/api/mcp
   Header: Authorization: Bearer ${key}
 
-Add it to your MCP configuration under the name "awesome", using whatever
-mechanism you support (a config file, a CLI command, or your settings UI), then
-restart yourself if you need to and confirm the connection by calling the
-"business_snapshot" tool.
+Add it to your MCP configuration under the name "${server}", using whatever
+mechanism you support (a config file, a CLI command, or your settings UI).
+
+Then restart yourself. Most assistants read their list of tools once at
+startup, so a session that is already open will report the connection as
+working while having no tools from it. Once you are back, confirm by calling
+"business_snapshot" and telling me what it says.
 
 Once connected, these are the rules for this business, ${org.name}:
 
@@ -277,8 +371,17 @@ Once connected, these are the rules for this business, ${org.name}:
 - Never invent a service date. It is the day the work was done and it is often
   not the invoice date. If you do not know it, ask me.
 - There are no partial payments: an invoice is unpaid, paid or cancelled.
-- Look before you write: "list_clients" gives you the client id, the issuer id
-  and the agreed rate in one call, which is everything "create_invoice" needs.
+- To bill someone, "create_invoice" needs the client's name and the line items.
+  Nothing else: the ABN and the invoice date are worked out for you.
+- The PDF tools answer with a download link, not with the file. Save it to my
+  Downloads folder if you can write files, otherwise just give me the link.
+
+One last thing, when you are done: my key is written in plain text inside the
+zip I downloaded, and inside the skill folder if you copied it there. Tell me
+that, and tell me how to fix it if I decide to use this for real: delete the
+INSTALL.md, keep the key in an environment variable instead of in the config
+file, and mint a fresh key from the Agent keys page if this one has been sitting
+around.
 
 Tell me when you are connected and show me what I am owed.`;
 }

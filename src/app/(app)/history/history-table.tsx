@@ -31,7 +31,7 @@ function serviceDates(inv: InvoiceListRow) {
     .map((i) => i.service_date)
     .filter((d): d is string => !!d)
     .sort();
-  if (dates.length === 0) return "—";
+  if (dates.length === 0) return "-";
   const label = formatDate(dates[0]);
   const extra = new Set(dates).size - 1;
   return extra > 0 ? `${label} (+${extra})` : label;
@@ -228,7 +228,7 @@ export function HistoryTable({
           ) : filtered && inScope("outstanding") ? (
             "No invoices match these filters."
           ) : (
-            "🎉 Nothing to chase — everything is paid."
+            "🎉 Nothing to chase, everything is paid."
           )
         }
       />
@@ -414,14 +414,14 @@ function InvoiceTable({
                   </td>
                   <td className="px-4 py-3">
                     <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {inv.issuer?.short_name ?? "—"}
+                      {inv.issuer?.short_name ?? "-"}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-900 dark:text-slate-100">
                     {inv.bill_to_name}
                   </td>
                   <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
-                    {inv.bill_to_suburb ?? "—"}
+                    {inv.bill_to_suburb ?? "-"}
                   </td>
                   <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                     {formatDate(inv.invoice_date)}
@@ -474,7 +474,7 @@ function NoteCell({ note }: { note: string | null }) {
   const ref = useRef<HTMLSpanElement>(null);
 
   if (!note)
-    return <span className="text-slate-400 dark:text-slate-500">—</span>;
+    return <span className="text-slate-400 dark:text-slate-500">-</span>;
 
   function show() {
     const r = ref.current?.getBoundingClientRect();

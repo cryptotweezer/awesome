@@ -36,6 +36,7 @@ async function invoicePdf(key) {
 
   const res = await call(key, "get_invoice_pdf", {
     invoice: recent.result[0].invoice_number,
+    include_base64: true,
   });
   assert.equal(res.ok, true, res.error);
   return Buffer.from(res.result.pdf_base64, "base64");
@@ -88,6 +89,7 @@ describe("statements follow the same rule", () => {
     assert.equal(clients.ok, true);
     const res = await call(KEY_B, "get_client_statement", {
       client_id: clients.result[0].id,
+      include_base64: true,
     });
     assert.equal(res.ok, true, res.error);
     const pdf = Buffer.from(res.result.pdf_base64, "base64");
@@ -96,5 +98,50 @@ describe("statements follow the same rule", () => {
       pdf.length < 20_000,
       `the guest statement is ${pdf.length} bytes, big enough to be carrying somebody else's logo`,
     );
+  });
+});
+
+describe("a document is handed over as a link, not as 60,000 characters", () => {
+  test("the default answer is a link, with no base64 in it", async () => {
+    const recent = await call(KEY_A, "recent_invoices", { limit: 1 });
+    const res = await call(KEY_A, "get_invoice_pdf", {
+      invoice: recent.result[0].invoice_number,
+    });
+    assert.equal(res.ok, true, res.error);
+    assert.ok(res.result.download_url?.includes("/api/agent/download/"));
+    assert.match(res.result.filename, /\.pdf$/);
+    assert.ok(res.result.size_bytes > 1000);
+    assert.equal(
+      res.result.pdf_base64,
+      undefined,
+      "the bytes came back unasked, which is what broke the agents",
+    );
+  });
+
+  // The link is absolute and built from APP_URL, which points at the deployed
+  // site even when the server under test is this laptop. What is being tested
+  // here is the token and the route, so follow the path against whatever base
+  // the suite was pointed at.
+  const here = (url) => BASE + new URL(url).pathname;
+
+  test("the link serves the PDF with no key at all", async () => {
+    const recent = await call(KEY_A, "recent_invoices", { limit: 1 });
+    const res = await call(KEY_A, "get_invoice_pdf", {
+      invoice: recent.result[0].invoice_number,
+    });
+    const file = await fetch(here(res.result.download_url));
+    assert.equal(file.status, 200);
+    assert.equal(file.headers.get("content-type"), "application/pdf");
+    const bytes = Buffer.from(await file.arrayBuffer());
+    assert.equal(bytes.subarray(0, 4).toString(), "%PDF");
+  });
+
+  test("a tampered token gets nothing", async () => {
+    const recent = await call(KEY_A, "recent_invoices", { limit: 1 });
+    const res = await call(KEY_A, "get_invoice_pdf", {
+      invoice: recent.result[0].invoice_number,
+    });
+    const url = here(res.result.download_url).slice(0, -3) + "aaa";
+    assert.equal((await fetch(url)).status, 404);
   });
 });

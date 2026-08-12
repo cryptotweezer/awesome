@@ -111,10 +111,19 @@ export function AgentKit({ hasKey }: { hasKey: boolean }) {
     const kit = state.kit;
     return (
       <div className="space-y-4">
-        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          Your key was created and is inside the file below. It is shown this
-          once and never again. Treat the file like a password: if it gets out,
-          revoke the key on the Agent keys page and make a new one.
+        <div className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <p>
+            Your key was created and is inside the file below. It is shown this
+            once and never again. Treat the file like a password: if it gets
+            out, revoke the key on the Agent keys page and make a new one.
+          </p>
+          <p>
+            It is written in plain text in the kit so that installing is one
+            paste, which is the right trade for trying this out. INSTALL.md
+            says what to do differently once you are billing for real: delete
+            that file, and keep the key in an environment variable rather than
+            in the skill folder.
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-3">

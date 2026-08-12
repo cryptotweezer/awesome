@@ -51,6 +51,41 @@ export type BusinessFieldsProps = {
   values?: Record<string, string>;
 };
 
+type BankDetails = {
+  bank: string;
+  accountName: string;
+  bsb: string;
+  accountNo: string;
+};
+
+/**
+ * The line that tells a client how to pay, written from the bank details.
+ *
+ * The four bank fields are stored but never printed: the only thing that
+ * reaches the footer of an invoice is this note. Somebody who fills in their
+ * BSB and account number has every reason to think the client will see them,
+ * and until now nobody did. So the note writes itself as those fields are
+ * typed, and stays editable, because plenty of businesses want to say
+ * something else entirely.
+ */
+export function composePaymentNote({
+  bank,
+  accountName,
+  bsb,
+  accountNo,
+}: BankDetails): string {
+  const who = [accountName.trim(), bank.trim()].filter(Boolean).join(", ");
+  const numbers = [
+    bsb.trim() && `BSB ${bsb.trim()}`,
+    accountNo.trim() && `Account ${accountNo.trim()}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const where = [who, numbers].filter(Boolean).join(", ");
+  if (!where) return "";
+  return `Please pay by bank transfer to ${where}. Use the invoice number as the payment reference.`;
+}
+
 export function BusinessFields({
   mode,
   org,
@@ -66,6 +101,43 @@ export function BusinessFields({
     values?.[name] ?? saved ?? "";
   const ticked = (name: string, saved: boolean) =>
     values ? values[name] === "on" : saved;
+
+  const [bank, setBank] = useState(() => v("bank_name", org?.bank_name));
+  const [accountName, setAccountName] = useState(() =>
+    v("bank_account_name", org?.bank_account_name),
+  );
+  const [bsb, setBsb] = useState(() => v("bank_bsb", org?.bank_bsb));
+  const [accountNo, setAccountNo] = useState(() =>
+    v("bank_account_no", org?.bank_account_no),
+  );
+  const [typedNote, setTypedNote] = useState(() =>
+    v("payment_note", org?.payment_note),
+  );
+
+  /**
+   * Whether the note is the person's own words. A saved note that is not
+   * exactly what we would have written is theirs, and typing in the box makes
+   * it theirs. Either way we stop rewriting it under them.
+   */
+  const [ownNote, setOwnNote] = useState(() => {
+    const saved = v("payment_note", org?.payment_note);
+    return (
+      saved.trim() !== "" &&
+      saved !==
+        composePaymentNote({
+          bank: v("bank_name", org?.bank_name),
+          accountName: v("bank_account_name", org?.bank_account_name),
+          bsb: v("bank_bsb", org?.bank_bsb),
+          accountNo: v("bank_account_no", org?.bank_account_no),
+        })
+    );
+  });
+
+  // Derived, not stored: while the note is ours, it simply IS the bank details
+  // rendered as a sentence, and follows every keystroke in the fields above.
+  const note = ownNote
+    ? typedNote
+    : composePaymentNote({ bank, accountName, bsb, accountNo });
 
   return (
     <>
@@ -218,34 +290,38 @@ export function BusinessFields({
 
       <Card
         title="How you get paid"
-        hint="These appear in the footer of every invoice and statement."
+        hint="Your bank details are not printed as they are. They go into the payment note below, which is what appears in the footer of every invoice and statement."
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Bank">
             <input
               name="bank_name"
-              defaultValue={v("bank_name", org?.bank_name)}
+              value={bank}
+              onChange={(e) => setBank(e.target.value)}
               className="input"
             />
           </Field>
           <Field label="Account name">
             <input
               name="bank_account_name"
-              defaultValue={v("bank_account_name", org?.bank_account_name)}
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
               className="input"
             />
           </Field>
           <Field label="BSB">
             <input
               name="bank_bsb"
-              defaultValue={v("bank_bsb", org?.bank_bsb)}
+              value={bsb}
+              onChange={(e) => setBsb(e.target.value)}
               className="input"
             />
           </Field>
           <Field label="Account number">
             <input
               name="bank_account_no"
-              defaultValue={v("bank_account_no", org?.bank_account_no)}
+              value={accountNo}
+              onChange={(e) => setAccountNo(e.target.value)}
               className="input"
             />
           </Field>
@@ -253,11 +329,32 @@ export function BusinessFields({
         <Field label="Payment note">
           <input
             name="payment_note"
-            defaultValue={v("payment_note", org?.payment_note)}
+            value={note}
+            onChange={(e) => {
+              setOwnNote(true);
+              setTypedNote(e.target.value);
+            }}
             placeholder="Please pay by the due date. Thank you."
             className="input"
           />
         </Field>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {ownNote ? (
+            <>
+              This is your own wording, so it stays as you left it.{" "}
+              <button
+                type="button"
+                onClick={() => setOwnNote(false)}
+                className="underline underline-offset-2 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                Write it from my bank details again
+              </button>
+              .
+            </>
+          ) : (
+            "Written for you from the details above, and kept up to date as you change them. Edit it and it stays exactly as you leave it."
+          )}
+        </p>
       </Card>
 
       <Card

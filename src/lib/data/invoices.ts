@@ -379,7 +379,7 @@ export async function getBillingTotals(org: Org): Promise<BillingTotals> {
       if (inFy) paid.fy += amount;
     }
 
-    const name = r.issuer?.short_name ?? "—";
+    const name = r.issuer?.short_name ?? "-";
     const entry = byIssuer.get(name) ?? { fy: 0, all: 0 };
     entry.all += amount;
     if (inFy) entry.fy += amount;
