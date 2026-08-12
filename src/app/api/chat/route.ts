@@ -81,8 +81,20 @@ export async function POST(request: Request) {
       remaining,
     });
   } catch (e) {
+    // The allowance is spent before the model is called, so a turn that never
+    // produced an answer would otherwise cost a message. Give it back: the
+    // person got nothing for it, and a bad afternoon should not eat a trial.
+    const { data: given } = await db.rpc("refund_ai_message", {
+      p_org_id: org.id,
+    });
+    // Worth a line in the server log: the message shown to the person is
+    // deliberately vague, and this is the only place the real reason exists.
+    console.error("[assistant]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "The assistant failed." },
+      {
+        error: e instanceof Error ? e.message : "The assistant failed.",
+        remaining: given ?? remaining,
+      },
       { status: 502 },
     );
   }

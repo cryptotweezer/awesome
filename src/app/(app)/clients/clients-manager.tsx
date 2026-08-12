@@ -37,6 +37,11 @@ export function ClientsManager({
   // null = closed; "new" = add; otherwise the client being edited.
   const [editing, setEditing] = useState<ClientWithIssuer | "new" | null>(null);
 
+  // Which of YOUR ABNs bills this client. With a single ABN there is nothing to
+  // choose and nothing to show, and a column headed "ABN" on a page about
+  // clients reads as the client's own ABN, which this app never asks for.
+  const showIssuer = issuers.length > 1;
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -54,7 +59,9 @@ export function ClientsManager({
             <tr>
               <th className="px-4 py-3 font-medium">Client</th>
               <th className="px-4 py-3 font-medium">Address</th>
-              <th className="px-4 py-3 font-medium">ABN</th>
+              {showIssuer && (
+                <th className="px-4 py-3 font-medium">Billed by</th>
+              )}
               {perClientDefaults && (
                 <th className="px-4 py-3 text-right font-medium">Rate</th>
               )}
@@ -65,7 +72,7 @@ export function ClientsManager({
             {clients.length === 0 && (
               <tr>
                 <td
-                  colSpan={perClientDefaults ? 5 : 4}
+                  colSpan={3 + (showIssuer ? 1 : 0) + (perClientDefaults ? 1 : 0)}
                   className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
                 >
                   No clients yet.
@@ -92,17 +99,19 @@ export function ClientsManager({
                     .filter(Boolean)
                     .join(", ") || BLANK}
                 </td>
-                <td className="px-4 py-3">
-                  {c.issuer ? (
-                    <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {c.issuer.short_name}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400 dark:text-slate-500">
-                      {BLANK}
-                    </span>
-                  )}
-                </td>
+                {showIssuer && (
+                  <td className="px-4 py-3">
+                    {c.issuer ? (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                        {c.issuer.short_name}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 dark:text-slate-500">
+                        {BLANK}
+                      </span>
+                    )}
+                  </td>
+                )}
                 {perClientDefaults && (
                   <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
                     {formatRate(c.default_rate)}
@@ -204,7 +213,7 @@ function ClientDialog({
                 value={issuers[0].id}
               />
             ) : (
-              <Field label="ABN (issuer)">
+              <Field label="Billed by (your ABN)">
                 <select
                   name="default_issuer_id"
                   defaultValue={client?.default_issuer_id ?? ""}
@@ -331,27 +340,35 @@ function DeleteButton({ id, name }: { id: string; name: string }) {
   }
 
   return (
-    <form action={action} className="flex items-center gap-1">
-      <input type="hidden" name="id" value={id} />
-      <span className="text-xs text-slate-500 dark:text-slate-400" title={name}>
-        Sure?
-      </span>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
-      >
-        {pending ? "…" : "Yes"}
-      </button>
-      <button
-        type="button"
-        onClick={() => setConfirming(false)}
-        className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-      >
-        No
-      </button>
-      {state.error && <span className="text-xs text-red-600">!</span>}
-    </form>
+    <div className="flex flex-col items-end gap-1">
+      <form action={action} className="flex items-center gap-1">
+        <input type="hidden" name="id" value={id} />
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          Delete {name}?
+        </span>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+        >
+          {pending ? "…" : "Yes"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+        >
+          No
+        </button>
+      </form>
+      {/* A refusal is worth reading. It used to be a bare "!", which told
+          somebody with an invoiced client nothing about why nothing happened. */}
+      {state.error && (
+        <p className="max-w-xs rounded-lg bg-red-50 px-3 py-2 text-left text-xs text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900">
+          {state.error}
+        </p>
+      )}
+    </div>
   );
 }
 

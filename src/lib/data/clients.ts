@@ -61,8 +61,32 @@ export async function updateClient(
   return data as Client;
 }
 
+/**
+ * Delete a client, but never one that has been invoiced.
+ *
+ * The foreign key already refuses it; what it says back is a constraint name,
+ * which tells the person nothing. So the invoices are counted first and the
+ * refusal is written in the words of the business: how many there are and what
+ * to do instead. Invoices are the record of what was billed, and dragging them
+ * out with the client would rewrite history no one is allowed to rewrite.
+ */
 export async function deleteClient(orgId: string, id: string): Promise<void> {
   const supabase = createAdminClient();
+
+  const { count, error: countError } = await supabase
+    .from("invoices")
+    .select("id", { count: "exact", head: true })
+    .eq("org_id", orgId)
+    .eq("client_id", id);
+  if (countError) {
+    throw new Error(`Failed to check the client's invoices: ${countError.message}`);
+  }
+  if (count && count > 0) {
+    throw new Error(
+      `This client has ${count} ${count === 1 ? "invoice" : "invoices"} and cannot be deleted: they are your record of what you billed. Delete those invoices first if they were a mistake, or leave the client here.`,
+    );
+  }
+
   const { error } = await supabase
     .from("clients")
     .delete()

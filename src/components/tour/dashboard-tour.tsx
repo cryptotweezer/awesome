@@ -68,8 +68,14 @@ const STEPS: Step[] = [
   },
 ];
 
-/** The browser's memory of the tour, for the stretch before a business exists. */
-const SEEN_KEY = "awesome:tour-seen";
+/**
+ * The browser's memory of the tour, for the stretch before a business exists.
+ *
+ * Keyed by person, never global: one browser is used by more than one account
+ * (signing up a second business, testing, a shared laptop), and a single key
+ * meant the first arrival switched the tour off for everybody after them.
+ */
+const seenKey = (userId: string) => `awesome:tour-seen:${userId}`;
 
 /** Fired by the "See the tour again" button on the overview. */
 export const TOUR_EVENT = "awesome:tour";
@@ -77,11 +83,14 @@ export const TOUR_EVENT = "awesome:tour";
 export function DashboardTour({
   hasOrg,
   done,
+  userId,
 }: {
   /** Whether the business exists yet. Without one, only step 1 can be acted on. */
   hasOrg: boolean;
-  /** Whether this business has already been through it. */
+  /** Whether THIS person has already been through it. */
   done: boolean;
+  /** Who is looking. The tour is per person, not per browser and not per business. */
+  userId: string;
 }) {
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [index, setIndex] = useState(0);
@@ -102,7 +111,7 @@ export function DashboardTour({
   // Auto-start on the first visit, and never again once it has been seen.
   useEffect(() => {
     if (done) return;
-    if (window.localStorage.getItem(SEEN_KEY) === "1") {
+    if (window.localStorage.getItem(seenKey(userId)) === "1") {
       // Seen while there was still nowhere to record it. Now there is.
       if (hasOrg) void finishTourAction();
       return;
@@ -111,7 +120,7 @@ export function DashboardTour({
     // we can ask which of the targets exist and where they are.
     const frame = requestAnimationFrame(start);
     return () => cancelAnimationFrame(frame);
-  }, [done, hasOrg, start]);
+  }, [done, hasOrg, start, userId]);
 
   // The replay button lives on the overview, several components away, so it
   // asks through the window rather than through props.
@@ -124,9 +133,9 @@ export function DashboardTour({
   const close = useCallback(() => {
     setSteps(null);
     setBox(null);
-    window.localStorage.setItem(SEEN_KEY, "1");
+    window.localStorage.setItem(seenKey(userId), "1");
     if (hasOrg) void finishTourAction();
-  }, [hasOrg]);
+  }, [hasOrg, userId]);
 
   const step = steps?.[index];
 

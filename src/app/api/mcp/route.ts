@@ -101,8 +101,13 @@ async function handle(msg: Incoming, agent: Agent): Promise<object | null> {
         const args = (params.arguments ?? {}) as Record<string, unknown>;
         try {
           const result = await def.handler(args, { agent });
+          // A handler that answers with nothing must still send text: an
+          // undefined `text` disappears in serialisation and the client is
+          // handed a content block with no content.
           return ok(id, {
-            content: [{ type: "text", text: JSON.stringify(result) }],
+            content: [
+              { type: "text", text: JSON.stringify(result ?? { ok: true }) },
+            ],
           });
         } catch (e) {
           // A tool failure is a result with isError, not a protocol error.

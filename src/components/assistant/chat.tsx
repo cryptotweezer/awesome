@@ -9,6 +9,66 @@ type Message = {
 };
 
 /**
+ * Markdown link, bold run, or a URL / document path written on its own.
+ * Everything else in the answer is left exactly as the model wrote it.
+ */
+const INLINE =
+  /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s)]+|\/(?:invoices|statements|backup)[^\s),.]*)/g;
+
+/** What a bare document path is called, so the person reads a thing and not a route. */
+function linkLabel(href: string): string {
+  const invoice = href.match(/^\/invoices\/([^/]+)\/pdf/);
+  if (invoice) return `Invoice ${invoice[1]} (PDF)`;
+  if (href.startsWith("/statements/client/")) return "Statement (PDF)";
+  if (href.startsWith("/statements/fy/")) return "Tax statement (PDF)";
+  if (href.startsWith("/backup")) return "Backup";
+  return href;
+}
+
+/**
+ * The assistant's answer, as text.
+ *
+ * It is told to write plain text, and mostly does, but a model raised on
+ * Markdown will still slip in a `**bold**` now and then, and a literal `**` in
+ * a chat bubble looks like a bug. This turns the handful of things it does emit
+ * into what they meant, and makes a document path clickable, which is how a PDF
+ * gets from here to the person: files never travel through the conversation.
+ */
+function Answer({ text }: { text: string }) {
+  const clean = text.replace(/^#{1,6}\s+/gm, "");
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+
+  for (const m of clean.matchAll(INLINE)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(clean.slice(last, at));
+    last = at + m[0].length;
+
+    const [, linkText, linkHref, bold, bare] = m;
+    if (bold) {
+      out.push(<strong key={key++}>{bold}</strong>);
+    } else {
+      const href = linkHref ?? bare;
+      out.push(
+        <a
+          key={key++}
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium underline underline-offset-2"
+        >
+          {linkText ?? linkLabel(href)}
+        </a>,
+      );
+    }
+  }
+  out.push(clean.slice(last));
+
+  return <p>{out}</p>;
+}
+
+/**
  * A working chat, not a demo one: whatever it says it did, it did, through the
  * same functions the dashboard forms use.
  *
@@ -92,6 +152,8 @@ export function Chat({
 
       if (!res.ok) {
         setError(body.error ?? "Something went wrong.");
+        // A failed turn is refunded on the server, so the count can go back up.
+        if (typeof body.remaining === "number") setLeft(body.remaining);
         if (res.status === 429) setLeft(0);
         return;
       }
@@ -153,7 +215,11 @@ export function Chat({
                   : "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100"
               }`}
             >
-              <p>{m.content}</p>
+              {m.role === "assistant" ? (
+                <Answer text={m.content} />
+              ) : (
+                <p>{m.content}</p>
+              )}
               {m.usedTools && m.usedTools.length > 0 && (
                 <p className="text-xs opacity-60">
                   {[...new Set(m.usedTools)].join(", ")}

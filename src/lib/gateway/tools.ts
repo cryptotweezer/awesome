@@ -11,6 +11,7 @@ import {
   reactivateInvoice,
   deleteInvoice,
   getInvoiceByRef,
+  getGstPosition,
   type NewInvoiceItem,
 } from "@/lib/data/invoices";
 import {
@@ -374,9 +375,21 @@ export const tools: Record<string, ToolDef> = {
         optStr(input, "issuer"),
       ),
   },
+  gst_position: {
+    description:
+      "GST collected, on a cash basis: this BAS quarter, the financial year to date, and when the BAS is due. " +
+      "The ONLY source of a GST figure. Prices include GST, so this is tax already inside what was charged, never an extra on top. Args: none.",
+    schema: NO_ARGS,
+    handler: async (_input, ctx) => {
+      const org = await getOrg(ctx.agent.orgId);
+      if (!org) throw new Error("Organisation not found");
+      return getGstPosition(org);
+    },
+  },
   fy_summary: {
     description:
-      "Billed and paid per ABN for a financial year. Args: fy_start? (defaults to current AU FY).",
+      "Billed and paid per ABN for a financial year. The amounts INCLUDE GST and are not GST figures: for GST use gst_position. " +
+      "Args: fy_start? (defaults to current AU FY).",
     schema: objSchema({
       fy_start: {
         ...DATE_FIELD,
@@ -556,30 +569,39 @@ export const tools: Record<string, ToolDef> = {
   mark_paid: {
     description: "Mark an invoice paid in full. Args: invoice. There are no partial payments.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input, ctx) =>
-      markPaid(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
+    handler: async (input, ctx) => {
+      const id = await resolveId(ctx.agent.orgId, input);
+      await markPaid(ctx.agent.orgId, id);
+      return afterWrite(ctx.agent.orgId, id);
+    },
   },
   mark_unpaid: {
     description: "Undo a payment. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input, ctx) =>
-      markUnpaid(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
+    handler: async (input, ctx) => {
+      const id = await resolveId(ctx.agent.orgId, input);
+      await markUnpaid(ctx.agent.orgId, id);
+      return afterWrite(ctx.agent.orgId, id);
+    },
   },
   cancel_invoice: {
     description:
       "Cancel an invoice (keeps the record and its number). Prefer this over deleting one that was already sent. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input, ctx) =>
-      cancelInvoice(ctx.agent.orgId, await resolveId(ctx.agent.orgId, input)),
+    handler: async (input, ctx) => {
+      const id = await resolveId(ctx.agent.orgId, input);
+      await cancelInvoice(ctx.agent.orgId, id);
+      return afterWrite(ctx.agent.orgId, id);
+    },
   },
   reactivate_invoice: {
     description: "Undo a cancellation. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
-    handler: async (input, ctx) =>
-      reactivateInvoice(
-        ctx.agent.orgId,
-        await resolveId(ctx.agent.orgId, input),
-      ),
+    handler: async (input, ctx) => {
+      const id = await resolveId(ctx.agent.orgId, input);
+      await reactivateInvoice(ctx.agent.orgId, id);
+      return afterWrite(ctx.agent.orgId, id);
+    },
   },
   delete_invoice: {
     description:
@@ -646,6 +668,21 @@ export const tools: Record<string, ToolDef> = {
     },
   },
 };
+
+/**
+ * What a status change answers with: the invoice as it now stands.
+ *
+ * These used to answer with nothing. `undefined` survives as far as
+ * `JSON.stringify`, which turns it into no value at all, and a tool message
+ * with no content is rejected outright by the chat API: marking an invoice paid
+ * changed the invoice and then failed the conversation. Handing back the row is
+ * both a real value and the thing the caller wants to read out anyway (status,
+ * number, total), without a second lookup.
+ */
+async function afterWrite(orgId: string, id: string) {
+  const invoice = await getInvoiceByRef(orgId, id);
+  return invoice ?? { ok: true, id };
+}
 
 async function refString(input: ToolInput): Promise<string> {
   const ref = String(input.invoice ?? input.id ?? input.invoice_number ?? "").trim();

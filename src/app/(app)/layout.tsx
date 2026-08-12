@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AssistantWidget } from "@/components/assistant/assistant-widget";
 import { DashboardTour } from "@/components/tour/dashboard-tour";
+import { tourKey } from "@/components/tour/tour-key";
 import { createClient } from "@/lib/supabase/server";
 import { daysSince } from "@/lib/format";
 import { NavLinks } from "./nav-links";
@@ -32,6 +33,7 @@ export default async function AppLayout({
   // No business yet: the session is still the source of the email in the
   // header, and the proxy has already established there is one.
   let email = ctx?.member.email ?? "";
+  let userId = ctx?.member.user_id ?? "";
   if (!ctx) {
     const auth = await createClient();
     const {
@@ -39,6 +41,7 @@ export default async function AppLayout({
     } = await auth.auth.getUser();
     if (!user?.email) redirect("/login");
     email = user.email;
+    userId = user.id;
   }
 
   const org = ctx?.org ?? null;
@@ -138,7 +141,8 @@ export default async function AppLayout({
           things on the page. It draws nothing until it has a reason to. */}
       <DashboardTour
         hasOrg={Boolean(org)}
-        done={Boolean(org?.onboarding?.tour_done)}
+        userId={userId}
+        done={Boolean(org?.onboarding?.[tourKey(userId)])}
       />
     </div>
   );
