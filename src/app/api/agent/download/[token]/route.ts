@@ -40,10 +40,15 @@ export async function GET(
     });
   }
 
-  const inline = new URL(request.url).searchParams.get("inline") === "1";
+  const contentType = doc.contentType ?? "application/pdf";
+  // A spreadsheet has nothing to show in a browser tab, so only a PDF honours
+  // ?inline=1; everything else is always a download.
+  const inline =
+    contentType === "application/pdf" &&
+    new URL(request.url).searchParams.get("inline") === "1";
   return new Response(new Uint8Array(doc.buffer), {
     headers: {
-      "Content-Type": "application/pdf",
+      "Content-Type": contentType,
       "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${doc.filename}"`,
       "Cache-Control": "no-store",
     },

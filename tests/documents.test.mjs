@@ -144,4 +144,44 @@ describe("a document is handed over as a link, not as 60,000 characters", () => 
     const url = here(res.result.download_url).slice(0, -3) + "aaa";
     assert.equal((await fetch(url)).status, 404);
   });
+
+  // A business owner asking for "my data" means the spreadsheet they forward to
+  // their accountant, not a JSON blob, and least of all 20,000 characters of
+  // base64 in the middle of a conversation.
+  test("a backup comes back as an Excel link by default", async () => {
+    const res = await call(KEY_B, "create_backup");
+    assert.equal(res.ok, true, res.error);
+    assert.equal(res.result.format, "excel");
+    assert.match(res.result.filename, /\.xlsx$/);
+    assert.ok(res.result.download_url?.includes("/api/agent/download/"));
+    assert.equal(
+      res.result.json_base64 ?? res.result.file_base64,
+      undefined,
+      "the bytes came back unasked, which is what the link is for",
+    );
+
+    const file = await fetch(here(res.result.download_url));
+    assert.equal(file.status, 200);
+    const bytes = Buffer.from(await file.arrayBuffer());
+    // Every .xlsx is a zip, so it starts with PK.
+    assert.equal(bytes.subarray(0, 2).toString(), "PK");
+  });
+
+  test("JSON is still there for whoever asks for it by name", async () => {
+    const res = await call(KEY_B, "create_backup", { format: "json" });
+    assert.equal(res.ok, true, res.error);
+    assert.equal(res.result.format, "json");
+    assert.match(res.result.filename, /\.json$/);
+
+    const file = await fetch(here(res.result.download_url));
+    assert.equal(file.status, 200);
+    const parsed = JSON.parse(await file.text());
+    assert.equal(parsed.meta.app, "awesome-billing");
+    assert.ok(Array.isArray(parsed.invoices));
+    assert.equal(
+      parsed.agent_keys,
+      undefined,
+      "a backup must never carry key material",
+    );
+  });
 });

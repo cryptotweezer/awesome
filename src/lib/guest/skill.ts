@@ -148,7 +148,10 @@ ${limitsSection(org)}
 - \`prepare_client_statement_email\`: the same for an account statement.
 
 **Housekeeping**
-- \`create_backup\`: the whole business as a JSON file, base64.
+- \`create_backup\`: the whole business as a file, by download link. It comes as
+  an **Excel workbook** (a sheet per table), which is what somebody means when
+  they ask for their data. Only pass \`format: "json"\` when they ask for JSON:
+  that is the complete, restorable copy rather than the readable one.
 
 ## Creating an invoice
 
@@ -167,12 +170,12 @@ Use the client's \`default_rate\` unless the user says otherwise. If the client
 has a usual service agreed, the description can be left out; otherwise say what
 the work was.
 
-## Handing over a PDF
+## Handing over a file
 
-The three document tools answer with a **download link** that works for 30
-minutes, plus the filename and the size. They do not dump the file into our
-conversation, because a PDF is about 60,000 characters of base64 and most
-assistants refuse a result that big.
+The three document tools and \`create_backup\` answer with a **download link**
+that works for 30 minutes, plus the filename and the size. They do not dump the
+file into our conversation, because a PDF is about 60,000 characters of base64
+and most assistants refuse a result that big.
 
 So: if you can write files, fetch the link and save it to the user's Downloads
 folder, then tell them the path. If you cannot, give them the link. Only pass
@@ -210,7 +213,7 @@ Both take the same key, either as \`Authorization: Bearer <key>\` or as
 
 ## Document links
 
-The PDF tools answer with a link to \`${baseUrl}/api/agent/download/...\`.
+The PDF and backup tools answer with a link to \`${baseUrl}/api/agent/download/...\`.
 It carries its own signed token, so it opens in a browser with no key and no
 login, and it stops working after 30 minutes. Nothing is stored: opening it
 renders the document again from live data.

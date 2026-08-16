@@ -4,6 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getInvoiceByRef, financialYearStart } from "@/lib/data/invoices";
 import { getClientStatement, getFyStatement } from "@/lib/data/statements";
 import { companyProfileFromOrg } from "@/lib/data/company";
+import { createBackup } from "@/lib/data/backup";
+import {
+  createBackupWorkbook,
+  XLSX_CONTENT_TYPE,
+} from "@/lib/data/backup-excel";
 import { getOrg } from "@/lib/data/org";
 import { loadLogo } from "@/lib/pdf/logo";
 import { todayInTimezone } from "@/lib/format";
@@ -14,7 +19,12 @@ import type { DocRef } from "./download";
 import type { Client, Issuer } from "@/lib/types";
 
 /** A document as bytes, before anybody decides how to hand it over. */
-export type RenderedDoc = { filename: string; buffer: Uint8Array };
+export type RenderedDoc = {
+  filename: string;
+  buffer: Uint8Array;
+  /** Defaults to PDF, which is what every document but the backup is. */
+  contentType?: string;
+};
 export type Pdf = { filename: string; size_bytes: number; pdf_base64: string };
 
 function slug(s: string): string {
@@ -222,7 +232,36 @@ export async function renderDoc(
       return renderClientStatementDoc(orgId, doc.ref);
     case "tax_statement":
       return renderTaxStatementDoc(orgId, doc.ref, doc.fyStart);
+    case "backup":
+      return renderBackupDoc(orgId, doc.ref);
   }
+}
+
+/**
+ * The whole business as a file. Excel by default because that is what somebody
+ * means when they ask for "my data"; JSON only when they say so, since that is
+ * the restorable copy rather than the readable one.
+ */
+export async function renderBackupDoc(
+  orgId: string,
+  format: "excel" | "json",
+): Promise<RenderedDoc & { counts: Record<string, number> }> {
+  if (format === "json") {
+    const backup = await createBackup(orgId);
+    return {
+      filename: `awesome-backup-${backup.meta.date}.json`,
+      buffer: new TextEncoder().encode(JSON.stringify(backup, null, 2)),
+      contentType: "application/json; charset=utf-8",
+      counts: backup.counts,
+    };
+  }
+  const wb = await createBackupWorkbook(orgId);
+  return {
+    filename: wb.filename,
+    buffer: wb.buffer,
+    contentType: XLSX_CONTENT_TYPE,
+    counts: wb.counts,
+  };
 }
 
 export async function renderInvoicePdf(orgId: string, ref: string): Promise<Pdf> {

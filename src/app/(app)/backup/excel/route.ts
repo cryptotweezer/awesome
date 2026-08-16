@@ -1,65 +1,27 @@
-import ExcelJS from "exceljs";
-import { createBackup } from "@/lib/data/backup";
+import {
+  createBackupWorkbook,
+  XLSX_CONTENT_TYPE,
+} from "@/lib/data/backup-excel";
 import { getCurrentOrg } from "@/lib/data/org";
 
 /**
  * Human-readable backup: one Excel workbook, a sheet per table. This is for
  * eyeballing in a spreadsheet, not for restoring (the JSON download is the
- * complete, restorable copy). Manual download only, behind the dashboard
- * session, and never exposed as an agent tool.
+ * complete, restorable copy). Behind the dashboard session; the agent gets the
+ * same workbook through `create_backup`, which builds it from the same place.
  *
  *   GET /backup/excel  -> awesome-backup-YYYY-MM-DD.xlsx
  */
-type Row = Record<string, unknown>;
-
-function coerce(v: unknown): unknown {
-  // Supabase returns numeric columns as strings; make them real numbers so the
-  // spreadsheet can sum and sort them.
-  if (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)) return Number(v);
-  return v;
-}
-
-function addSheet(wb: ExcelJS.Workbook, name: string, rows: Row[]) {
-  const ws = wb.addWorksheet(name);
-  if (rows.length === 0) return;
-  const cols = Object.keys(rows[0]);
-  ws.columns = cols.map((c) => ({
-    header: c,
-    key: c,
-    width: Math.min(Math.max(c.length + 2, 12), 40),
-  }));
-  for (const r of rows) {
-    const out: Row = {};
-    for (const c of cols) out[c] = coerce(r[c]);
-    ws.addRow(out);
-  }
-  ws.getRow(1).font = { bold: true };
-  ws.views = [{ state: "frozen", ySplit: 1 }];
-}
-
 export async function GET() {
   const session = await getCurrentOrg();
   if (!session) return new Response("Not found", { status: 404 });
 
-  const backup = await createBackup(session.org.id);
+  const wb = await createBackupWorkbook(session.org.id);
 
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "awesome-billing";
-  wb.created = new Date();
-  addSheet(wb, "Invoices", backup.invoices as Row[]);
-  addSheet(wb, "Line Items", backup.invoice_items as Row[]);
-  addSheet(wb, "Clients", backup.clients as Row[]);
-  addSheet(wb, "ABNs", backup.issuers as Row[]);
-  addSheet(wb, "Business", [backup.org as Row]);
-
-  const buffer = await wb.xlsx.writeBuffer();
-  const filename = `awesome-backup-${backup.meta.date}.xlsx`;
-
-  return new Response(new Uint8Array(buffer as ArrayBuffer), {
+  return new Response(new Uint8Array(wb.buffer), {
     headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Type": XLSX_CONTENT_TYPE,
+      "Content-Disposition": `attachment; filename="${wb.filename}"`,
       "Cache-Control": "no-store",
     },
   });

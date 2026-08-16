@@ -32,13 +32,13 @@ import {
   type ClientInput,
 } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
-import { createBackup } from "@/lib/data/backup";
 import { appBaseUrl } from "@/lib/app-url";
 import { signDownloadToken, type DocRef } from "./download";
 import {
   renderInvoiceDoc,
   renderClientStatementDoc,
   renderTaxStatementDoc,
+  renderBackupDoc,
   toPdf,
   prepareClientEmail,
   prepareClientStatementEmail,
@@ -364,6 +364,7 @@ async function deliver(
 ): Promise<Record<string, unknown>> {
   const { token, expiresAt } = signDownloadToken(orgId, doc);
   const base = await appBaseUrl();
+  const isPdf = (rendered.contentType ?? "application/pdf") === "application/pdf";
   return {
     filename: rendered.filename,
     size_bytes: rendered.buffer.byteLength,
@@ -372,7 +373,9 @@ async function deliver(
     how_to_use:
       "Give the user this link, or save the file to their Downloads folder if you can write files. It stops working in 30 minutes.",
     ...(input.include_base64 === true
-      ? { pdf_base64: toPdf(rendered).pdf_base64 }
+      ? isPdf
+        ? { pdf_base64: toPdf(rendered).pdf_base64 }
+        : { file_base64: Buffer.from(rendered.buffer).toString("base64") }
       : {}),
   };
 }
@@ -558,16 +561,32 @@ export const tools: Record<string, ToolDef> = {
   },
   create_backup: {
     description:
-      "A full backup of the business (clients, issuers, invoices, line items, company profile) as a JSON file in base64, for safe-keeping off the database. Args: none. Returns filename, counts and json_base64.",
-    schema: NO_ARGS,
-    handler: async (_input, ctx) => {
-      const backup = await createBackup(ctx.agent.orgId);
-      const json = JSON.stringify(backup);
+      "A full backup of the business (invoices, line items, clients, ABNs, company profile) as a " +
+      "download link good for 30 minutes. Defaults to an Excel workbook, one sheet per table, which " +
+      'is what somebody means when they ask for their data. Pass format: "json" only when they ask ' +
+      "for JSON specifically: that is the complete, restorable copy, not the readable one. " +
+      "Args: format? (excel | json), include_base64? (only if you need the bytes to attach).",
+    schema: objSchema({
+      format: {
+        type: "string",
+        enum: ["excel", "json"],
+        description:
+          'Defaults to "excel". Use "json" only when the user asks for JSON.',
+      },
+      include_base64: INCLUDE_BASE64,
+    }),
+    handler: async (input, ctx) => {
+      const format = optStr(input, "format") === "json" ? "json" : "excel";
+      const doc = await renderBackupDoc(ctx.agent.orgId, format);
       return {
-        filename: `awesome-backup-${backup.meta.date}.json`,
-        generated_at: backup.meta.generated_at,
-        counts: backup.counts,
-        json_base64: Buffer.from(json).toString("base64"),
+        ...(await deliver(
+          ctx.agent.orgId,
+          { kind: "backup", ref: format },
+          doc,
+          input,
+        )),
+        format,
+        counts: doc.counts,
       };
     },
   },

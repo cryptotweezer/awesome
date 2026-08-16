@@ -23,7 +23,9 @@ export const DOWNLOAD_TTL_SECONDS = 30 * 60;
 export type DocRef =
   | { kind: "invoice"; ref: string }
   | { kind: "client_statement"; ref: string }
-  | { kind: "tax_statement"; ref: string; fyStart?: string | null };
+  | { kind: "tax_statement"; ref: string; fyStart?: string | null }
+  /** The whole business as a file. `ref` is the format: "excel" or "json". */
+  | { kind: "backup"; ref: "excel" | "json" };
 
 type Payload = {
   /** Organisation. The link can only ever produce this business's document. */
@@ -114,6 +116,10 @@ export function verifyDownloadToken(token: string): VerifiedDownload | null {
   }
   if (payload.k === "invoice" || payload.k === "client_statement") {
     return { orgId: payload.o, doc: { kind: payload.k, ref: payload.r } };
+  }
+  if (payload.k === "backup") {
+    if (payload.r !== "excel" && payload.r !== "json") return null;
+    return { orgId: payload.o, doc: { kind: "backup", ref: payload.r } };
   }
   return null;
 }
