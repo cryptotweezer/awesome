@@ -13,7 +13,14 @@ import { protectAuth } from "@/lib/security/arcjet";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  // Only ever a path on this site. `//evil.com` is a valid relative-looking
+  // string that browsers treat as an absolute URL, so one leading slash is
+  // required and two are refused.
+  const requested = searchParams.get("next");
+  const next =
+    requested && requested.startsWith("/") && !requested.startsWith("//")
+      ? requested
+      : "/";
 
   // The one door open to the whole internet once signups are enabled. Shield
   // and a per-address ceiling only: no bot detection, because a false positive

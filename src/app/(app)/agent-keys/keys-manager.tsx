@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import type { AgentKey } from "@/lib/types";
+import { ALL_SCOPES, SCOPE_LABELS, type Scope } from "@/lib/gateway/scopes";
 import {
   mintKeyAction,
   revokeKeyAction,
@@ -11,6 +12,10 @@ import {
 } from "./actions";
 
 const initial: KeyActionState = { ok: false };
+
+/** A key past its date still lists as a row, and stops working at the gateway. */
+const expired = (k: AgentKey): boolean =>
+  !!k.expires_at && new Date(k.expires_at).getTime() < Date.now();
 
 /** UTC ISO -> "YYYY-MM-DD HH:MM" (stable, no hydration mismatch). */
 function fmt(iso: string | null): string {
@@ -53,6 +58,7 @@ export function KeysManager({ keys }: { keys: AgentKey[] }) {
           <thead className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
               <th className="px-4 py-3 font-medium">Agent</th>
+              <th className="px-4 py-3 font-medium">Can</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Created</th>
               <th className="px-4 py-3 font-medium">Last used</th>
@@ -63,7 +69,7 @@ export function KeysManager({ keys }: { keys: AgentKey[] }) {
             {keys.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
                 >
                   No keys yet. Create one for each agent.
@@ -79,7 +85,24 @@ export function KeysManager({ keys }: { keys: AgentKey[] }) {
                   {k.label}
                 </td>
                 <td className="px-4 py-3">
-                  {k.is_active ? (
+                  <div className="flex flex-wrap gap-1">
+                    {(k.scopes ?? []).map((scope) => (
+                      <span
+                        key={scope}
+                        title={SCOPE_LABELS[scope as Scope]?.detail}
+                        className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  {expired(k) ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                      Expired
+                    </span>
+                  ) : k.is_active ? (
                     <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                       Active
                     </span>
@@ -91,6 +114,11 @@ export function KeysManager({ keys }: { keys: AgentKey[] }) {
                 </td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                   {fmt(k.created_at)}
+                  {k.expires_at && !expired(k) && (
+                    <span className="mt-0.5 block text-[11px] text-amber-600 dark:text-amber-400">
+                      expires {k.expires_at.slice(0, 10)}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
                   {fmt(k.last_used_at)}
@@ -201,6 +229,49 @@ function MintDialog({
               placeholder="Claude, Codex, Emma, OpenClaw…"
               className="input"
             />
+          </label>
+
+          <fieldset>
+            <legend className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              What it may do
+            </legend>
+            <div className="space-y-2">
+              {ALL_SCOPES.map((scope) => (
+                <label
+                  key={scope}
+                  className="flex cursor-pointer gap-2.5 rounded-lg p-2 ring-1 ring-slate-200 transition hover:bg-slate-50 dark:ring-slate-800 dark:hover:bg-slate-800/50"
+                >
+                  <input
+                    type="checkbox"
+                    name="scope"
+                    value={scope}
+                    // Read and write are what an agent is for. Deleting is
+                    // off unless somebody turns it on: it is the one action
+                    // that cannot be undone.
+                    defaultChecked={scope !== "delete"}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-slate-900 dark:accent-slate-100"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">
+                      {SCOPE_LABELS[scope].title}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                      {SCOPE_LABELS[scope].detail}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Expires on{" "}
+              <span className="font-normal text-slate-400">
+                optional, blank means never
+              </span>
+            </span>
+            <input type="date" name="expires_at" className="input" />
           </label>
 
           {state.error && (

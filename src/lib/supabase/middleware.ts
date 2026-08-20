@@ -9,20 +9,37 @@ import { isAllowedEmail, isGuestSignupEnabled } from "@/lib/auth";
 // session and without an organisation, which is precisely what must not exist.
 
 /**
- * Endpoints that carry their own credential and have no browser session:
- * the gateway authenticates with a per-agent key (src/lib/gateway/auth.ts) and
- * the cron endpoint with CRON_SECRET. They skip the session check so they reach
- * their handler and can answer 401 properly, instead of being redirected to a
- * login page a machine cannot use.
+ * Endpoints that carry their own credential, or none at all, and have no
+ * browser session: the gateway authenticates with a per-agent key or an OAuth
+ * token (src/lib/gateway/auth.ts), the cron endpoint with CRON_SECRET, and the
+ * OAuth machine endpoints with the client's own credentials. They skip the
+ * session check so they reach their handler and can answer properly, instead
+ * of being redirected to a login page a machine cannot use.
+ *
+ * The discovery documents are deliberately public: a client reads them BEFORE
+ * it has any credential, which is the whole point of discovery.
+ *
+ * Note /oauth/authorize is NOT here. It is the one part of the flow that a
+ * human performs in a browser, and it must require a session.
  *
  * Everything else, including /api/chat, needs a signed-in user.
  */
+/**
+ * A redirect target we are willing to send a browser to. One leading slash,
+ * never two: `//evil.com` looks relative and is not.
+ */
+function isLocalPath(value: string | null): value is string {
+  return !!value && value.startsWith("/") && !value.startsWith("//");
+}
+
 function isSelfAuthenticated(request: NextRequest): boolean {
   const path = request.nextUrl.pathname;
   return (
     path.startsWith("/api/agent") ||
     path.startsWith("/api/mcp") ||
-    path.startsWith("/api/cron")
+    path.startsWith("/api/cron") ||
+    path.startsWith("/api/oauth") ||
+    path.startsWith("/.well-known/")
   );
 }
 
@@ -81,18 +98,28 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Not signed in on a protected route → login.
+  // Not signed in on a protected route → login. Consent carries its query
+  // string through the login, because sending somebody to sign in and then
+  // dropping them on the dashboard abandons the authorization half way and
+  // the assistant waiting on the callback just times out.
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
+    const returnTo = path.startsWith("/oauth/authorize")
+      ? `${path}${request.nextUrl.search}`
+      : null;
     url.pathname = "/login";
+    url.search = "";
+    if (returnTo) url.searchParams.set("next", returnTo);
     return NextResponse.redirect(url);
   }
 
-  // Already signed in and visiting /login → home.
+  // Already signed in and visiting /login → home, or on to whatever sent them
+  // here. Somebody who is signed in and lands on the login page mid-consent
+  // must continue the consent, not be dropped on the dashboard.
   if (user && path.startsWith("/login")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+    const wanted = request.nextUrl.searchParams.get("next");
+    const onward = isLocalPath(wanted) ? wanted : "/";
+    return NextResponse.redirect(new URL(onward, request.nextUrl.origin));
   }
 
   return supabaseResponse;

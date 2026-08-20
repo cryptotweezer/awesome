@@ -3,7 +3,18 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-export function LoginButton({ compact = false }: { compact?: boolean }) {
+export function LoginButton({
+  compact = false,
+  next,
+}: {
+  compact?: boolean;
+  /**
+   * Where to land after signing in. Set during an agent authorization, so the
+   * consent screen resumes instead of the person being dropped on the
+   * dashboard with an assistant still waiting on the callback.
+   */
+  next?: string;
+}) {
   const [loading, setLoading] = useState(false);
 
   async function signInWithGoogle() {
@@ -12,7 +23,9 @@ export function LoginButton({ compact = false }: { compact?: boolean }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: next
+          ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+          : `${window.location.origin}/auth/callback`,
         queryParams: { prompt: "select_account" },
       },
     });

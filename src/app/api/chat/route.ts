@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ALL_SCOPES } from "@/lib/gateway/scopes";
 import { getCurrentOrg, signatureFor } from "@/lib/data/org";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runAssistant, type ChatMessage } from "@/lib/chat/assistant";
@@ -69,6 +70,11 @@ export async function POST(request: Request) {
           // are when created through the form.
           label: signatureFor(member),
           orgId: org.id,
+          // The person is signed in and looking at the dashboard, where they
+          // can already do all of this by clicking. Scopes exist to restrain a
+          // credential handed to somebody else's software, not the owner.
+          scopes: ALL_SCOPES,
+          via: "session",
         },
       },
       org,

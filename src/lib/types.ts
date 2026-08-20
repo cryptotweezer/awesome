@@ -139,6 +139,10 @@ export interface AgentKey {
   org_id: string;
   label: string;
   is_active: boolean;
+  /** What this key may do: read | write | delete. */
+  scopes: string[];
+  /** Null means it does not expire. */
+  expires_at: string | null;
   created_at: string;
   last_used_at: string | null;
 }

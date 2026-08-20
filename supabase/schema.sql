@@ -236,14 +236,98 @@ create table if not exists awesome.agent_keys (
   org_id       uuid        not null,
   label        text        not null,
   key_hash     text        not null,
+  -- What this key may do. A tool declares the scope it needs and the gateway
+  -- refuses the call without it. Defaults to everything, so adding the
+  -- permission model never disabled a key that was already working.
+  scopes       text[]      not null default array['read','write','delete'],
+  expires_at   timestamptz,
   is_active    boolean     not null default true,
   created_at   timestamptz not null default now(),
   last_used_at timestamptz,
+  constraint agent_keys_scopes_check
+    check (scopes <@ array['read','write','delete'] and array_length(scopes, 1) >= 1),
   constraint agent_keys_pkey primary key (id),
   constraint agent_keys_key_hash_key unique (key_hash),
   constraint agent_keys_org_fkey foreign key (org_id)
     references awesome.orgs(id) on delete cascade
 );
+
+-- ---------------------------------------------------------------------
+--  OAuth 2.1. The app is its own authorization server, deliberately not
+--  Supabase's: that one binds the consent screen to the project's single
+--  Site URL, and this project is shared with two unrelated apps. Owning
+--  the flow here keeps them uncoupled.
+--
+--  The hard part of being an authorization server is authenticating the
+--  human, and it is skipped: whoever approves is already signed in to
+--  this app. We only record consent and issue tokens.
+-- ---------------------------------------------------------------------
+
+-- Registered by assistants themselves. A row here is NOT a trusted party:
+-- it is a name shown on the consent screen before a person decides.
+-- Global, with no org_id, because a client registers before it knows who
+-- will approve it.
+create table if not exists awesome.oauth_clients (
+  id                 uuid        not null default gen_random_uuid(),
+  client_id          text        not null,
+  client_name        text        not null,
+  redirect_uris      text[]      not null,
+  client_secret_hash text,
+  created_at         timestamptz not null default now(),
+  last_used_at       timestamptz,
+  constraint oauth_clients_pkey primary key (id),
+  constraint oauth_clients_client_id_key unique (client_id),
+  constraint oauth_clients_redirects_check check (array_length(redirect_uris, 1) >= 1)
+);
+
+-- Authorization codes: single use, one minute, bound to one PKCE challenge
+-- and one redirect URI. All three are checked again at the token endpoint.
+create table if not exists awesome.oauth_codes (
+  id             uuid        not null default gen_random_uuid(),
+  code_hash      text        not null,
+  client_id      text        not null,
+  org_id         uuid        not null,
+  user_id        uuid        not null,
+  user_label     text        not null,
+  scopes         text[]      not null,
+  redirect_uri   text        not null,
+  code_challenge text        not null,
+  expires_at     timestamptz not null,
+  used_at        timestamptz,
+  created_at     timestamptz not null default now(),
+  constraint oauth_codes_pkey primary key (id),
+  constraint oauth_codes_code_hash_key unique (code_hash),
+  constraint oauth_codes_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- One row per connected assistant. Tokens stored hashed, like a key, so the
+-- table alone cannot be replayed. `label` signs this connection's writes.
+create table if not exists awesome.oauth_tokens (
+  id                 uuid        not null default gen_random_uuid(),
+  org_id             uuid        not null,
+  user_id            uuid        not null,
+  client_id          text        not null,
+  client_name        text        not null,
+  label              text        not null,
+  scopes             text[]      not null,
+  access_token_hash  text,
+  access_expires_at  timestamptz,
+  refresh_token_hash text,
+  revoked_at         timestamptz,
+  last_used_at       timestamptz,
+  created_at         timestamptz not null default now(),
+  constraint oauth_tokens_pkey primary key (id),
+  constraint oauth_tokens_access_hash_key unique (access_token_hash),
+  constraint oauth_tokens_refresh_hash_key unique (refresh_token_hash),
+  constraint oauth_tokens_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+create index if not exists oauth_codes_expiry_idx on awesome.oauth_codes (expires_at);
+create index if not exists oauth_tokens_org_idx   on awesome.oauth_tokens (org_id);
+create index if not exists oauth_tokens_live_idx  on awesome.oauth_tokens (org_id, created_at desc)
+  where revoked_at is null;
 
 create index if not exists org_members_email_idx    on awesome.org_members (lower(email));
 create index if not exists orgs_demo_activity_idx   on awesome.orgs (last_active_at) where is_demo;
@@ -265,6 +349,25 @@ alter table awesome.clients       enable row level security;
 alter table awesome.invoices      enable row level security;
 alter table awesome.invoice_items enable row level security;
 alter table awesome.agent_keys    enable row level security;
+alter table awesome.oauth_clients enable row level security;
+alter table awesome.oauth_codes   enable row level security;
+alter table awesome.oauth_tokens  enable row level security;
+
+-- Codes are worthless once used or expired, and a table of dead codes is a
+-- table nobody prunes.
+create or replace function awesome.purge_expired_oauth_codes()
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  removed integer;
+begin
+  delete from awesome.oauth_codes where expires_at < now() - interval '1 hour';
+  get diagnostics removed = row_count;
+  return removed;
+end $$;
 
 grant usage on schema awesome to service_role;
 grant all on all tables in schema awesome to service_role;

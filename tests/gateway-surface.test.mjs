@@ -41,6 +41,7 @@ const EXPECTED_TOOLS = [
   "get_client_statement",
   "get_invoice",
   "get_invoice_pdf",
+  "get_started",
   "get_tax_statement",
   "gst_position",
   "list_clients",

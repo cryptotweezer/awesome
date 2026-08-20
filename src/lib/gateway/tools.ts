@@ -1,5 +1,6 @@
 import "server-only";
 import type { Agent } from "./auth";
+import { hasScope, type Scope } from "./scopes";
 import { todayInTimezone } from "@/lib/format";
 import { getOrg } from "@/lib/data/org";
 import {
@@ -32,6 +33,7 @@ import {
   type ClientInput,
 } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
+import { guidanceMarkdown } from "@/lib/guest/skill";
 import { appBaseUrl } from "@/lib/app-url";
 import { signDownloadToken, type DocRef } from "./download";
 import {
@@ -62,7 +64,26 @@ export type ToolDef = {
   description: string;
   handler: ToolHandler;
   schema?: Record<string, unknown>;
+  /**
+   * What a caller must hold to run this. Declared next to the tool so it
+   * cannot be forgotten, and enforced once in `authorizeTool` below rather
+   * than inside each handler, which is how one tool ends up missing the check.
+   *
+   * There is no default on purpose: a tool with no scope is not callable.
+   * Forgetting should be a loud failure, never a silent hole.
+   */
+  scope: Scope;
 };
+
+/**
+ * The single gate both transports call before running anything. Returns the
+ * missing scope, or null when the caller may proceed.
+ */
+export function authorizeTool(name: string, agent: Agent): Scope | null {
+  const def = tools[name];
+  if (!def) return null;
+  return hasScope(agent.scopes, def.scope) ? null : def.scope;
+}
 
 /** Build a JSON Schema object. Kept permissive on extra keys: several tools
  *  accept aliases (invoice / id / invoice_number) that agents already use. */
@@ -409,13 +430,34 @@ async function withLinks(
 // -- the registry -----------------------------------------------------------
 export const tools: Record<string, ToolDef> = {
   // reads
+  get_started: {
+    scope: "read",
+    description:
+      "READ THIS FIRST, before calling any other tool. What this business is, what you can " +
+      "do here, and the rules you must follow. Call it once at the start of a session: it is " +
+      "cheap, and everything else makes more sense afterwards. Args: none.",
+    schema: NO_ARGS,
+    handler: async (_input, ctx) => {
+      const org = await getOrg(ctx.agent.orgId);
+      if (!org) throw new Error("Organisation not found");
+      const issuers = await listIssuers(ctx.agent.orgId);
+      return {
+        guide: guidanceMarkdown({ org, issuer: issuers[0] ?? null }),
+        connected_as: ctx.agent.label,
+        you_may: ctx.agent.scopes,
+      };
+    },
+  },
+
   business_snapshot: {
+    scope: "read",
     description:
       "The daily pulse in one call: outstanding + overdue, unpaid count, billed this month / this FY / all time, and paid all time.",
     schema: NO_ARGS,
     handler: (_input, ctx) => businessSnapshot(ctx.agent.orgId),
   },
   today: {
+    scope: "read",
     description:
       "Today's date in the business's own timezone, plus the last 14 days with their weekday " +
       "names. Use this to resolve what the user says (yesterday, last Wednesday, the 20th) into " +
@@ -440,17 +482,20 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   who_owes: {
+    scope: "read",
     description: "Every client with an unpaid balance: amount, count, overdue.",
     schema: NO_ARGS,
     handler: (_input, ctx) => whoOwes(ctx.agent.orgId),
   },
   overdue_invoices: {
+    scope: "read",
     description:
       "Flat list of every overdue unpaid invoice: number, client, ABN, due date, days overdue, balance.",
     schema: NO_ARGS,
     handler: (_input, ctx) => overdueInvoices(ctx.agent.orgId),
   },
   client_summary: {
+    scope: "read",
     description:
       "Per-client snapshot: billed all-time, paid, outstanding, unpaid/overdue counts, last invoice date. Args: client (name).",
     schema: objSchema({ client: CLIENT_REF_PROPS.client }, ["client"]),
@@ -458,6 +503,7 @@ export const tools: Record<string, ToolDef> = {
       clientSummary(ctx.agent.orgId, reqStr(input, "client")),
   },
   find_invoices: {
+    scope: "read",
     description:
       "Bounded invoice search. All optional: client, issuer, status (unpaid/paid/cancelled), from, to (YYYY-MM-DD), limit (default 20). Newest first.",
     schema: objSchema({
@@ -479,12 +525,14 @@ export const tools: Record<string, ToolDef> = {
       }),
   },
   client_account: {
+    scope: "read",
     description: "A client's unpaid invoices with balances. Args: client (name).",
     schema: objSchema({ client: CLIENT_REF_PROPS.client }, ["client"]),
     handler: (input, ctx) =>
       clientAccount(ctx.agent.orgId, reqStr(input, "client")),
   },
   recent_invoices: {
+    scope: "read",
     description: "Latest invoices, optionally for one client. Args: client?, limit?.",
     schema: objSchema({
       client: CLIENT_REF_PROPS.client,
@@ -498,6 +546,7 @@ export const tools: Record<string, ToolDef> = {
       ),
   },
   billed_in_period: {
+    scope: "read",
     description:
       "Billed total per ABN in a date window. Args: from, to (YYYY-MM-DD), issuer?.",
     schema: objSchema(
@@ -517,6 +566,7 @@ export const tools: Record<string, ToolDef> = {
       ),
   },
   gst_position: {
+    scope: "read",
     description:
       "GST collected, on a cash basis: this BAS quarter, the financial year to date, and when the BAS is due. " +
       "The ONLY source of a GST figure. Prices include GST, so this is tax already inside what was charged, never an extra on top. Args: none.",
@@ -528,6 +578,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   fy_summary: {
+    scope: "read",
     description:
       "Billed and paid per ABN for a financial year. The amounts INCLUDE GST and are not GST figures: for GST use gst_position. " +
       "Args: fy_start? (defaults to current AU FY).",
@@ -541,17 +592,20 @@ export const tools: Record<string, ToolDef> = {
       fySummary(ctx.agent.orgId, optStr(input, "fy_start")),
   },
   get_invoice: {
+    scope: "read",
     description: "One invoice with its line items. Args: invoice (number or UUID).",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
     handler: async (input, ctx) =>
       getInvoiceByRef(ctx.agent.orgId, await refString(input)),
   },
   list_clients: {
+    scope: "read",
     description: "All clients with their details (incl. internal email).",
     schema: NO_ARGS,
     handler: (_input, ctx) => listClients(ctx.agent.orgId),
   },
   list_issuers: {
+    scope: "read",
     description:
       "The ABNs this business invoices under: id, name, ABN, ACN. Most businesses have exactly one, " +
       "and create_invoice already uses it on its own, so you rarely need this. Ask when the business " +
@@ -560,6 +614,7 @@ export const tools: Record<string, ToolDef> = {
     handler: (_input, ctx) => listIssuers(ctx.agent.orgId),
   },
   create_backup: {
+    scope: "read",
     description:
       "A full backup of the business (invoices, line items, clients, ABNs, company profile) as a " +
       "download link good for 30 minutes. Defaults to an Excel workbook, one sheet per table, which " +
@@ -593,6 +648,7 @@ export const tools: Record<string, ToolDef> = {
 
   // documents (a signed link by default; base64 only when asked for)
   get_invoice_pdf: {
+    scope: "read",
     description:
       "The invoice as a PDF. Returns a download link good for 30 minutes, its filename and its size. " +
       "Give the link to the user, or save the file to their Downloads folder yourself. " +
@@ -608,6 +664,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   get_client_statement: {
+    scope: "read",
     description:
       "A client's outstanding-payment statement as a PDF. Returns a download link good for 30 minutes. " +
       "Only lists what is still unpaid, so ask for it before marking things paid, not after. " +
@@ -628,6 +685,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   get_tax_statement: {
+    scope: "read",
     description:
       "Every invoice issued under one ABN in a financial year, as a PDF for the accountant. " +
       "Returns a download link good for 30 minutes. Args: issuer? (name; defaults to the only ABN " +
@@ -659,6 +717,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   prepare_client_email: {
+    scope: "read",
     description:
       "Recipient + filled template + the invoice PDFs, ready for your own email tool. " +
       "Each attachment carries both a download link and its base64. Args: client (name) or client_id, " +
@@ -699,6 +758,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   prepare_client_statement_email: {
+    scope: "read",
     description:
       "Recipient + filled template + that client's account statement, ready for your own email tool. " +
       "Recipient and statement are always the same client, so they can't be crossed. " +
@@ -732,6 +792,7 @@ export const tools: Record<string, ToolDef> = {
 
   // writes
   create_invoice: {
+    scope: "write",
     description:
       "Create an invoice. Args: client (name) or client_id, items[], issuer? (only if the business bills under several ABNs), " +
       "invoice_date? (when it is BILLED, defaults to today where the business is), internal_notes?. " +
@@ -784,6 +845,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   update_invoice: {
+    scope: "write",
     description:
       "Edit an invoice (REPLACES all its items, so send the full list, not just the changed one). " +
       "Args: invoice, items[], and only what else is changing: client?, issuer?, invoice_date?, internal_notes?. " +
@@ -842,6 +904,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   mark_paid: {
+    scope: "write",
     description: "Mark an invoice paid in full. Args: invoice. There are no partial payments.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
     handler: async (input, ctx) => {
@@ -851,6 +914,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   mark_unpaid: {
+    scope: "write",
     description: "Undo a payment. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
     handler: async (input, ctx) => {
@@ -860,6 +924,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   cancel_invoice: {
+    scope: "write",
     description:
       "Cancel an invoice (keeps the record and its number). Prefer this over deleting one that was already sent. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
@@ -870,6 +935,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   reactivate_invoice: {
+    scope: "write",
     description: "Undo a cancellation. Args: invoice.",
     schema: objSchema({ invoice: INVOICE_REF }, ["invoice"]),
     handler: async (input, ctx) => {
@@ -879,6 +945,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   delete_invoice: {
+    scope: "delete",
     description:
       "PERMANENTLY delete an invoice. Args: invoice, confirm:true. Must confirm with the user first.",
     schema: objSchema(
@@ -906,6 +973,7 @@ export const tools: Record<string, ToolDef> = {
     },
   },
   create_client: {
+    scope: "write",
     description:
       "Add a client. Args: name (required), address_line?, suburb?, state?, postcode?, email?, default_issuer_id?, default_description?, default_rate?.",
     schema: objSchema(
@@ -915,6 +983,7 @@ export const tools: Record<string, ToolDef> = {
     handler: (input, ctx) => createClient(ctx.agent.orgId, clientInput(input)),
   },
   update_client: {
+    scope: "write",
     description:
       "Edit a client. Args: id (required) + only the fields to change. Changing default_rate never rewrites past invoices.",
     schema: objSchema(

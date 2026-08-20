@@ -39,6 +39,11 @@ const SCOPED = [
   "invoices",
   "invoice_items",
   "agent_keys",
+  // OAuth connections and the consents that produced them. `oauth_clients` is
+  // deliberately absent: a registered client is global, has no org_id, and is
+  // just a name shown on a consent screen.
+  "oauth_tokens",
+  "oauth_codes",
 ];
 
 /**
@@ -58,6 +63,14 @@ const EXCEPTIONS = {
   // The key's row, looked up by the hash of the presented secret. This is the
   // lookup that produces the org for every gateway request.
   "lib/gateway/auth.ts:agent_keys": "resolves the org from the presented key",
+  // The OAuth equivalents. This file exists ONLY to turn a presented secret
+  // into an identity, which is why it is exempt and why nothing else in
+  // lib/oauth is: every query there looks a row up by the hash of the secret
+  // the caller sent, and none of them accepts an org, a user or a row id.
+  "lib/oauth/credentials.ts:oauth_tokens":
+    "resolves the org from the presented access or refresh token",
+  "lib/oauth/credentials.ts:oauth_codes":
+    "resolves the org from the single-use code the browser brought back",
 };
 
 /** Every .ts / .tsx file under src. */

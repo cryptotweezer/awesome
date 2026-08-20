@@ -136,6 +136,7 @@ const WITHOUT_FILES = new Set([
  */
 const linkTools: Record<string, ToolDef> = {
   invoice_pdf_link: {
+    scope: "read",
     description:
       "A link to one invoice's PDF, to give to the person. Args: invoice (the invoice number).",
     schema: {
@@ -158,6 +159,7 @@ const linkTools: Record<string, ToolDef> = {
     },
   },
   client_statement_link: {
+    scope: "read",
     description:
       "A link to a client's outstanding-payment statement PDF, to give to the person. Args: client (name) or client_id.",
     schema: {
@@ -179,6 +181,7 @@ const linkTools: Record<string, ToolDef> = {
     },
   },
   tax_statement_link: {
+    scope: "read",
     description:
       "A link to the financial-year tax statement PDF for one ABN. Args: issuer? (short name; omit when the business has one ABN), fy_start? (YYYY-07-01, defaults to the current FY).",
     schema: {

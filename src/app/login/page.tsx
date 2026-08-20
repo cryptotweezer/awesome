@@ -12,8 +12,8 @@ import { Reveal, ScrollProgress, SectionLinks, CopyLine } from "./motion";
  *
  * That distinction is the whole point of the page and it is the thing people
  * get wrong, so it is told in two sections rather than one. An assistant you
- * drive (Claude, Codex, Copilot, Gemini) connects with a key and a skill and
- * does what you ask while you are there. An agent that runs on its own (Hermes,
+ * drive (Claude, Codex, Copilot, Gemini) connects with one command, approves
+ * itself in the browser, and does what you ask while you are there. An agent that runs on its own (Hermes,
  * OpenClaw) connects exactly the same way, and everything extra it can do,
  * sending the email, waking up on a schedule, answering you on your phone,
  * comes from that agent's own setup, never from here.
@@ -234,35 +234,40 @@ export default async function LoginPage({
           id="connect"
           eyebrow="Your own AI"
           title="Connect the assistant you already use"
-          lead="The app is the gateway. Every AI reaches your books through the same door, with its own key, and inherits every rule underneath it. Claude Code, Claude Desktop, Codex, Copilot CLI, Gemini, Cursor: whatever speaks MCP over HTTP is already compatible."
+          lead="One command, then approve it in your browser. No key to copy, nothing to download, nothing to configure. The app is the gateway: every AI reaches your books through the same door and inherits every rule underneath it. Claude Code, Claude Desktop, Codex, Copilot CLI, Gemini, Cursor: whatever speaks MCP over HTTP is already compatible."
         >
           <ol className="grid gap-4 lg:grid-cols-3">
             <Step
               n="1"
-              title="Create a key and download the kit"
-              body="From the Agent keys page, or step 4 of the setup guide. One key per assistant, shown once, revocable on its own without disturbing the others."
+              title="Run one command"
+              body="Point your assistant at the app. No key to generate, nothing to paste in, nothing to download."
             />
             <Step
               n="2"
-              title="Install the skill"
-              body="Paste the setup prompt into a fresh chat and your assistant connects itself, or follow INSTALL.md and do it by hand in half a minute."
+              title="Approve it in your browser"
+              body="A page here shows which assistant is asking and exactly what it will be able to do. Untick anything you would rather it could not, and confirm."
             />
             <Step
               n="3"
               title="Ask it for something"
-              body={`"What am I owed?" is the usual first question. From then on your assistant bills for you from wherever you already work.`}
+              body={`"What am I owed?" is the usual first question. It reads how your business works by itself, so there is no setup after this.`}
             />
           </ol>
 
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl p-6 ring-1 ring-slate-200 lift dark:ring-slate-800">
-              <h3 className="font-semibold">What the skill actually is</h3>
+              <h3 className="font-semibold">How it knows your business</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                A small folder your AI reads before it touches anything. The kit
-                you download is generated for your business, so it already knows
-                your printed name, your ABN, your payment terms and your time
-                zone, the rules it is not allowed to bend, and the full list of
-                tools it can call.
+                On its first question it asks the app how things work here, and
+                gets back your printed name, your ABN, your payment terms, your
+                time zone, the rules it is not allowed to bend and the full list
+                of tools. Nothing to install: the briefing comes down the same
+                connection.
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                You can also download it as a folder, which is the same text as
+                files. Worth it if you would rather read it before trusting it,
+                or want your assistant to keep it loaded permanently:
               </p>
               <ul className="mt-4 space-y-1.5 text-sm text-slate-600 dark:text-slate-400">
                 <li>
@@ -294,8 +299,7 @@ export default async function LoginPage({
                 Installing it is copying that folder where your assistant keeps
                 its skills, <code className="text-xs">~/.claude/skills/</code>{" "}
                 or <code className="text-xs">~/.codex/skills/</code>, or
-                uploading it in Claude Desktop. The zip carries your key, so it
-                is treated like a password.
+                uploading it in Claude Desktop.
               </p>
             </div>
 
@@ -318,7 +322,8 @@ export default async function LoginPage({
                 <h3 className="font-semibold">Or from any script</h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                   Every tool is also one plain HTTP call, for anything that does
-                  not speak MCP.
+                  not speak MCP. A server or a cron job has no browser to
+                  approve anything in, so that is what keys are for.
                 </p>
                 <div className="mt-4">
                   <CopyLine
@@ -330,14 +335,16 @@ export default async function LoginPage({
           </div>
 
           <div className="mt-6 rounded-2xl bg-slate-50 p-6 dark:bg-slate-900">
-            <h3 className="font-semibold">What a key can and cannot reach</h3>
+            <h3 className="font-semibold">
+              What a connected assistant can and cannot reach
+            </h3>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-              A key calls billing tools on your business and nothing else. It
+              It calls billing tools on your business and nothing else. It
               cannot run SQL, cannot name a table, cannot see another business,
-              and cannot reach anything outside billing. You mint one per
-              assistant so you can tell them apart, and revoking one takes a
-              couple of seconds and stops it immediately, with every other key
-              still working.
+              and cannot reach anything outside billing. You choose what each one
+              is allowed to do when you approve it: look only, or also create and
+              edit, or also delete. Cutting one off takes a couple of seconds and
+              stops it immediately, with every other assistant still working.
             </p>
           </div>
         </Section>
@@ -356,7 +363,7 @@ export default async function LoginPage({
               points={[
                 "You ask, it does it, the file comes back in your chat.",
                 "Runs where you already work: your terminal, your editor, your desktop.",
-                "Set up in a minute with the key and the skill from your dashboard.",
+                "One command and a click to approve. No key changes hands.",
                 "Nothing happens when you are not there, which is often exactly what you want.",
               ]}
             />
@@ -367,7 +374,7 @@ export default async function LoginPage({
                 "Lives on a server or a phone bot and answers you in your messaging app.",
                 "Has its own email, so it can actually send the invoice to your client.",
                 "Can be put on a schedule: bill the same clients on the 1st, chase overdue every Monday.",
-                "Same key, same tools, same rules. It just does not need you awake.",
+                "Connects with a key instead, because a server has no browser to approve anything in. Same tools, same rules.",
               ]}
               highlight
             />

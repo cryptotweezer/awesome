@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
-import { authenticateAgent } from "@/lib/gateway/auth";
-import { tools } from "@/lib/gateway/tools";
+import { authenticateAgent, unauthorizedHeaders } from "@/lib/gateway/auth";
+import { appBaseUrl } from "@/lib/app-url";
+import { authorizeTool, tools } from "@/lib/gateway/tools";
 import { protectGateway } from "@/lib/security/arcjet";
 
 /**
@@ -18,7 +19,9 @@ export async function POST(
   ctx: RouteContext<"/api/agent/[tool]">,
 ) {
   const agent = await authenticateAgent(request);
-  if (!agent) return json({ ok: false, error: "Unauthorized" }, 401);
+  if (!agent) {
+    return json({ ok: false, error: "Unauthorized" }, 401, unauthorizedHeaders(await appBaseUrl()));
+  }
 
   // Rate limited per key, after authentication, so one agent's runaway loop
   // cannot spend another agent's budget.
@@ -28,6 +31,19 @@ export async function POST(
   const { tool } = await ctx.params;
   const def = tools[tool];
   if (!def) return json({ ok: false, error: `Unknown tool "${tool}"` }, 404);
+
+  // Scope, before the body is even parsed. Naming the missing scope lets the
+  // agent tell its user what to re-authorise instead of retrying blindly.
+  const missing = authorizeTool(tool, agent);
+  if (missing) {
+    return json(
+      {
+        ok: false,
+        error: `This connection is not allowed to ${missing}. Ask the owner to grant the "${missing}" permission.`,
+      },
+      403,
+    );
+  }
 
   let input: Record<string, unknown> = {};
   try {
@@ -54,9 +70,17 @@ export async function POST(
   }
 }
 
-function json(body: unknown, status: number): Response {
+function json(
+  body: unknown,
+  status: number,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...extra,
+    },
   });
 }

@@ -1,6 +1,11 @@
 import type { NextRequest } from "next/server";
-import { authenticateAgent, type Agent } from "@/lib/gateway/auth";
-import { tools } from "@/lib/gateway/tools";
+import {
+  authenticateAgent,
+  unauthorizedHeaders,
+  type Agent,
+} from "@/lib/gateway/auth";
+import { authorizeTool, tools } from "@/lib/gateway/tools";
+import { appBaseUrl } from "@/lib/app-url";
 import { protectGateway } from "@/lib/security/arcjet";
 
 /**
@@ -25,7 +30,10 @@ type Incoming = {
 export async function POST(request: NextRequest) {
   const agent = await authenticateAgent(request);
   if (!agent) {
-    return json({ error: "Unauthorized" }, 401);
+    // The pointer to our protected resource metadata is what lets a client
+    // with no credential start the OAuth flow by itself. Without this header
+    // it has nowhere to look and reports that it cannot connect.
+    return json({ error: "Unauthorized" }, 401, unauthorizedHeaders(await appBaseUrl()));
   }
 
   // Rate limited per key, after authentication. Note there is no bot detection
@@ -98,6 +106,23 @@ async function handle(msg: Incoming, agent: Agent): Promise<object | null> {
         const name = typeof params.name === "string" ? params.name : "";
         const def = tools[name];
         if (!def) return err(id, -32602, `Unknown tool "${name}"`);
+        // Scope check before the handler, in the one place both transports
+        // share, so a tool can never be the one that forgot.
+        const missing = authorizeTool(name, agent);
+        if (missing) {
+          return ok(id, {
+            content: [
+              {
+                type: "text",
+                text:
+                  `This connection is not allowed to ${missing}. ` +
+                  `Ask the owner to grant the "${missing}" permission, then reconnect.`,
+              },
+            ],
+            isError: true,
+          });
+        }
+
         const args = (params.arguments ?? {}) as Record<string, unknown>;
         try {
           const result = await def.handler(args, { agent });
@@ -138,9 +163,17 @@ function ok(id: JsonRpcId, result: object) {
 function err(id: JsonRpcId, code: number, message: string) {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
-function json(body: unknown, status: number): Response {
+function json(
+  body: unknown,
+  status: number,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      ...extra,
+    },
   });
 }

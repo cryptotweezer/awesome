@@ -65,7 +65,16 @@ make here is free of that.
 `;
 }
 
-function skillMd({ org, issuer }: SkillContext): string {
+/**
+ * The guidance itself: what this business is, the rules, the tools, how to
+ * work. Exported because the `get_started` gateway tool serves exactly this,
+ * so an assistant that connected over OAuth learns the same thing without
+ * downloading anything. One source, so the kit and the tool cannot drift.
+ */
+export function guidanceMarkdown({
+  org,
+  issuer,
+}: Pick<SkillContext, "org" | "issuer">): string {
   return `---
 name: ${skillFolderName(org)}
 description: >-
@@ -241,12 +250,33 @@ function installMd(ctx: SkillContext): string {
   const envVar = `${server.toUpperCase().replace(/-/g, "_")}_KEY`;
   return `# Installing this
 
-Two things go into your assistant: the **skill** (the folder in this zip, which
-teaches it how this business works) and the **MCP server** (the connection,
-which is what lets it actually do anything).
+## The short way: no key, no files
 
-The fastest route is to paste the prompt from the setup page and let your
-assistant configure itself. If you would rather do it by hand:
+If your assistant runs somewhere with a browser, you do not need this zip at
+all. Point it at the app with no credential and approve it when the browser
+opens:
+
+    claude mcp add --transport http ${server} ${ctx.baseUrl}/api/mcp --scope user
+
+Run \`/mcp\` in Claude Code and choose this server to authorise it. Codex opens
+the browser the first time it calls a tool. For Claude Desktop, add the same URL
+with \`"type": "http"\` and no header.
+
+You approve on a page of this app that lists exactly what the assistant will be
+able to do, and you can untick anything you would rather it could not. Nothing
+is copied anywhere, the connection expires and renews itself, and you can cut it
+off from the Agents page at any time.
+
+Once connected, it reads how this business works by calling \`get_started\`, so
+the skill folder below is optional: it is the same guidance as a file, useful if
+you would rather your assistant always had it loaded, or want to read it before
+trusting it.
+
+## The key way
+
+Use a key when the thing connecting has **no browser**: a server, a cron job, a
+script. The key is in the commands below, already filled in. It is a password in
+a plain text file, so treat it like one.
 
 ## Claude Code
 
@@ -335,7 +365,7 @@ function mcpConfigJson(ctx: SkillContext): string {
 export function buildSkillFiles(ctx: SkillContext): Record<string, string> {
   const folder = skillFolderName(ctx.org);
   return {
-    [`${folder}/SKILL.md`]: skillMd(ctx),
+    [`${folder}/SKILL.md`]: guidanceMarkdown(ctx),
     [`${folder}/references/connection.md`]: referenceMd(ctx),
     [`${folder}/INSTALL.md`]: installMd(ctx),
     [`${folder}/mcp-config.json`]: mcpConfigJson(ctx),

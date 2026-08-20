@@ -85,15 +85,26 @@ export default async function GuidePage() {
         title="2. Connect your own AI"
         hint="Your assistant, talking to this app. It does the work; you keep paying only for your own AI usage."
       >
-        <Step n={4} title="Create your key and download your kit" done={hasKeys}>
+        <Step n={4} title="Connect your assistant" done={hasKeys}>
           <p>
-            The kit is a folder that teaches your AI assistant how your business
-            works, with the connection details already filled in. One key per AI
-            assistant, revocable at any time from{" "}
+            Run one command and approve it in your browser. There is no key to
+            create, nothing to paste and nothing to download: your assistant
+            finds its own way to an approval page here, where you choose what it
+            is allowed to do.
+          </p>
+          <CopyBlock text={`claude mcp add --transport http billing ${baseUrl}/api/mcp --scope user`} />
+          <p>
+            That is Claude Code. Codex, Claude Desktop and anything else that
+            speaks MCP take the same address, and{" "}
             <Link href="/agent-keys" className="underline">
-              Agent keys
-            </Link>
-            .
+              Agents
+            </Link>{" "}
+            has the exact line for each, plus everything currently connected.
+          </p>
+          <p>
+            <strong>Use a key instead when there is no browser</strong>, which
+            means a server, a cron job or a script. You mint those on the same
+            page, choosing what each one may do and when it expires.
           </p>
           <AgentKit hasKey={hasKeys} />
         </Step>
@@ -105,10 +116,16 @@ export default async function GuidePage() {
           stepId="installed"
         >
           <p>
-            Open a fresh chat with your assistant and paste the setup prompt
-            from step 4. It connects itself. If you would rather do it by hand,
-            INSTALL.md in the kit has the exact commands for Claude Code, Claude
-            Desktop and Codex.
+            After running the command, tell your assistant to connect: Claude
+            Code lists the server under <code>/mcp</code>, and Codex opens the
+            browser the first time it calls a tool. You approve on a page here
+            that spells out what it will be able to do.
+          </p>
+          <p>
+            It learns how your business works by itself on its first question,
+            so there is nothing to install afterwards. The kit above is the same
+            briefing as files, for when you would rather read it first or keep
+            it loaded permanently.
           </p>
           <p>
             <strong>Then restart your assistant.</strong> Most of them read
