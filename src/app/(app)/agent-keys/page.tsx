@@ -5,6 +5,8 @@ import { appBaseUrl } from "@/lib/app-url";
 import { KeysManager } from "./keys-manager";
 import { Connections } from "./connections";
 import { ConnectCommand } from "./connect-command";
+import { Activity } from "./activity";
+import { listAgentCalls } from "@/lib/gateway/audit";
 
 /**
  * Everything that can act on this business, in one place.
@@ -16,9 +18,10 @@ import { ConnectCommand } from "./connect-command";
  */
 export default async function AgentKeysPage() {
   const org = await orgForPage();
-  const [keys, connections, baseUrl] = await Promise.all([
+  const [keys, connections, calls, baseUrl] = await Promise.all([
     listAgentKeys(org.id),
     listConnections(org.id),
+    listAgentCalls(org.id, 25),
     appBaseUrl(),
   ]);
 
@@ -70,6 +73,20 @@ export default async function AgentKeysPage() {
           </p>
         </div>
         <KeysManager keys={keys} />
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            Activity
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            The last 25 things your agents asked for, refusals included. What
+            they asked for is recorded; the invoices and clients themselves
+            never are.
+          </p>
+        </div>
+        <Activity calls={calls} />
       </section>
     </div>
   );

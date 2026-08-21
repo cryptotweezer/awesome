@@ -13,6 +13,7 @@ import {
   deleteInvoice,
   getInvoiceByRef,
   getGstPosition,
+  findDuplicateInvoice,
   type NewInvoiceItem,
 } from "@/lib/data/invoices";
 import {
@@ -30,6 +31,8 @@ import {
   listClients,
   createClient,
   updateClient,
+  deleteClient,
+  type ClientPatch,
   type ClientInput,
 } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
@@ -73,14 +76,25 @@ export type ToolDef = {
    * Forgetting should be a loud failure, never a silent hole.
    */
   scope: Scope;
+  /**
+   * Whether calling this twice makes two of something. Only the creates are:
+   * setting a value twice lands in the same place, but raising an invoice
+   * twice bills somebody twice. Flagged tools accept an `idempotency_key` and
+   * the dispatcher replays the first answer instead of running again.
+   */
+  idempotent?: true;
 };
 
 /**
  * The single gate both transports call before running anything. Returns the
  * missing scope, or null when the caller may proceed.
  */
-export function authorizeTool(name: string, agent: Agent): Scope | null {
-  const def = tools[name];
+export function authorizeTool(
+  name: string,
+  agent: Agent,
+  registry: Record<string, ToolDef> = tools,
+): Scope | null {
+  const def = registry[name];
   if (!def) return null;
   return hasScope(agent.scopes, def.scope) ? null : def.scope;
 }
@@ -102,6 +116,14 @@ const DATE_FIELD = {
 } as const;
 
 const NO_ARGS = objSchema({});
+
+/** Offered on the tools that create something. See `lib/gateway/idempotency.ts`. */
+const IDEMPOTENCY_KEY = {
+  type: "string",
+  description:
+    "Optional. Pass a stable value of your own here and retrying this call " +
+    "cannot create a second one: you get the original record back instead.",
+} as const;
 
 const INVOICE_REF = {
   type: ["string", "number"],
@@ -600,7 +622,9 @@ export const tools: Record<string, ToolDef> = {
   },
   list_clients: {
     scope: "read",
-    description: "All clients with their details (incl. internal email).",
+    description:
+      "All clients with their details (incl. internal email). is_active:false means archived: " +
+      "they still exist and keep their history, but the business is no longer invoicing them.",
     schema: NO_ARGS,
     handler: (_input, ctx) => listClients(ctx.agent.orgId),
   },
@@ -793,6 +817,7 @@ export const tools: Record<string, ToolDef> = {
   // writes
   create_invoice: {
     scope: "write",
+    idempotent: true,
     description:
       "Create an invoice. Args: client (name) or client_id, items[], issuer? (only if the business bills under several ABNs), " +
       "invoice_date? (when it is BILLED, defaults to today where the business is), internal_notes?. " +
@@ -825,10 +850,42 @@ export const tools: Record<string, ToolDef> = {
           type: "string",
           description: "Never printed on the invoice. Dashboard only.",
         },
+        idempotency_key: IDEMPOTENCY_KEY,
+        allow_duplicate: {
+          type: "boolean",
+          description:
+            "Only after the refusal below: confirms this really is a second " +
+            "invoice for the same client, day and amount.",
+        },
       },
     },
     handler: async (input, ctx) => {
       const client = await clientFor(ctx.agent.orgId, input);
+      const invoiceDate =
+        optStr(input, "invoice_date") ?? (await orgToday(ctx.agent.orgId));
+      const lines = items(input);
+
+      // The second net, under the idempotency key: an agent that retried
+      // without one, or a person who asked twice. A refusal naming the invoice
+      // that already exists, rather than a silent merge, because a business
+      // genuinely can bill the same client the same amount twice in one day.
+      if (input.allow_duplicate !== true) {
+        const existing = await findDuplicateInvoice(
+          ctx.agent.orgId,
+          client.id,
+          invoiceDate,
+          lines.reduce((sum, it) => sum + it.rate * it.quantity, 0),
+        );
+        if (existing) {
+          throw new Error(
+            `Invoice ${existing.invoice_number} already bills ${client.name} ` +
+              `${existing.total} on ${invoiceDate}. Nothing was created. Tell the ` +
+              `user it is already there, and only call this again with ` +
+              `allow_duplicate: true if they confirm they want a second one.`,
+          );
+        }
+      }
+
       return createInvoice(ctx.agent.orgId, {
         client_id: client.id,
         issuer_id: await issuerFor(
@@ -836,11 +893,10 @@ export const tools: Record<string, ToolDef> = {
           input,
           client.default_issuer_id,
         ),
-        invoice_date:
-          optStr(input, "invoice_date") ?? (await orgToday(ctx.agent.orgId)),
+        invoice_date: invoiceDate,
         internal_notes: optStr(input, "internal_notes"),
         created_by: ctx.agent.label,
-        items: items(input),
+        items: lines,
       });
     },
   },
@@ -962,7 +1018,7 @@ export const tools: Record<string, ToolDef> = {
     handler: async (input, ctx) => {
       if (input.confirm !== true) {
         throw new Error(
-          "delete_invoice needs confirm:true — confirm with the user first",
+          "delete_invoice needs confirm:true. Confirm with the user first.",
         );
       }
       await deleteInvoice(
@@ -974,10 +1030,15 @@ export const tools: Record<string, ToolDef> = {
   },
   create_client: {
     scope: "write",
+    idempotent: true,
     description:
       "Add a client. Args: name (required), address_line?, suburb?, state?, postcode?, email?, default_issuer_id?, default_description?, default_rate?.",
     schema: objSchema(
-      { name: { type: "string" }, ...CLIENT_FIELDS },
+      {
+        name: { type: "string" },
+        ...CLIENT_FIELDS,
+        idempotency_key: IDEMPOTENCY_KEY,
+      },
       ["name"],
     ),
     handler: (input, ctx) => createClient(ctx.agent.orgId, clientInput(input)),
@@ -985,18 +1046,26 @@ export const tools: Record<string, ToolDef> = {
   update_client: {
     scope: "write",
     description:
-      "Edit a client. Args: id (required) + only the fields to change. Changing default_rate never rewrites past invoices.",
+      "Edit a client. Args: id (required) + only the fields to change. Changing default_rate never rewrites past invoices. " +
+      "Set is_active:false to ARCHIVE a client who has stopped using the business: they disappear from the lists a new " +
+      "invoice is raised from and keep every invoice they were ever sent. That is what to do instead of deleting one.",
     schema: objSchema(
       {
         id: { type: "string", description: "Client UUID from list_clients." },
         name: { type: "string" },
         ...CLIENT_FIELDS,
+        is_active: {
+          type: "boolean",
+          description:
+            "false archives the client, true brings them back. Nothing is lost either way.",
+        },
       },
       ["id"],
     ),
     handler: (input, ctx) => {
       const id = reqStr(input, "id");
-      const patch: Partial<ClientInput> = {};
+      const patch: ClientPatch = {};
+      if ("is_active" in input) patch.is_active = input.is_active !== false;
       if ("name" in input) patch.name = reqStr(input, "name");
       if ("address_line" in input) patch.address_line = optStr(input, "address_line");
       if ("suburb" in input) patch.suburb = optStr(input, "suburb");
@@ -1012,6 +1081,34 @@ export const tools: Record<string, ToolDef> = {
         patch.default_description = optStr(input, "default_description");
       if ("default_rate" in input) patch.default_rate = optNum(input, "default_rate");
       return updateClient(ctx.agent.orgId, id, patch);
+    },
+  },
+  delete_client: {
+    scope: "delete",
+    description:
+      "PERMANENTLY delete a client, and ONLY one entered by mistake: a client who has ever been invoiced cannot be " +
+      "deleted, because those invoices are the record of what was billed. To stop dealing with a client, archive them " +
+      "instead (update_client with is_active:false). Args: client (name) or client_id, confirm:true. Confirm with the user first.",
+    schema: objSchema(
+      {
+        ...CLIENT_REF_PROPS,
+        confirm: {
+          type: "boolean",
+          const: true,
+          description: "Must be true, and only after the user has explicitly confirmed.",
+        },
+      },
+      ["confirm"],
+    ),
+    handler: async (input, ctx) => {
+      if (input.confirm !== true) {
+        throw new Error(
+          "delete_client needs confirm:true. Confirm with the user first.",
+        );
+      }
+      const client = await clientFor(ctx.agent.orgId, input);
+      await deleteClient(ctx.agent.orgId, client.id);
+      return { deleted: true, name: client.name };
     },
   },
 };

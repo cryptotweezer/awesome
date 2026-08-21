@@ -39,6 +39,11 @@ const SCOPED = [
   "invoices",
   "invoice_items",
   "agent_keys",
+  // What agents did, and the answers a retry must be given again instead of
+  // redoing. Both are per-business and both are written on every tool call,
+  // which makes them the easiest place to leak one business into another.
+  "agent_calls",
+  "agent_writes",
   // OAuth connections and the consents that produced them. `oauth_clients` is
   // deliberately absent: a registered client is global, has no org_id, and is
   // just a name shown on a consent screen.

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authenticateAgent, unauthorizedHeaders } from "@/lib/gateway/auth";
 import { appBaseUrl } from "@/lib/app-url";
-import { authorizeTool, tools } from "@/lib/gateway/tools";
+import { runTool } from "@/lib/gateway/dispatch";
 import { protectGateway } from "@/lib/security/arcjet";
 
 /**
@@ -29,21 +29,6 @@ export async function POST(
   if (!guard.ok) return json({ ok: false, error: guard.reason }, guard.status);
 
   const { tool } = await ctx.params;
-  const def = tools[tool];
-  if (!def) return json({ ok: false, error: `Unknown tool "${tool}"` }, 404);
-
-  // Scope, before the body is even parsed. Naming the missing scope lets the
-  // agent tell its user what to re-authorise instead of retrying blindly.
-  const missing = authorizeTool(tool, agent);
-  if (missing) {
-    return json(
-      {
-        ok: false,
-        error: `This connection is not allowed to ${missing}. Ask the owner to grant the "${missing}" permission.`,
-      },
-      403,
-    );
-  }
 
   let input: Record<string, unknown> = {};
   try {
@@ -59,15 +44,13 @@ export async function POST(
     return json({ ok: false, error: "Invalid JSON body" }, 400);
   }
 
-  try {
-    const result = await def.handler(input, { agent });
-    return json({ ok: true, result }, 200);
-  } catch (e) {
-    return json(
-      { ok: false, error: e instanceof Error ? e.message : "Failed" },
-      400,
-    );
-  }
+  // Everything that happens around a tool call (the scope gate, the retry
+  // guard, the log) lives in one dispatcher both transports share, so this
+  // route only has to turn the outcome into HTTP.
+  const outcome = await runTool(tool, input, agent);
+  return outcome.ok
+    ? json({ ok: true, result: outcome.result }, 200)
+    : json({ ok: false, error: outcome.error }, outcome.status);
 }
 
 function json(

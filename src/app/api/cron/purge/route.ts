@@ -18,6 +18,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  *
  * The logo files of the deleted businesses go with them, since object storage
  * is not covered by database cascades.
+ *
+ * It also trims the two append-only agent tables, which is unrelated to trials
+ * but wants exactly the same daily schedule.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -61,5 +64,23 @@ export async function GET(request: Request) {
       .catch(() => undefined);
   }
 
-  return NextResponse.json({ purged: purged.length, days });
+  // Same schedule, different reason: the agent log and the retry guard are
+  // append-only, so without an expiry they become the biggest tables in the
+  // database and nobody notices until it matters. This is not gated on the
+  // trial purge succeeding, and a failure here is reported, not fatal.
+  const { data: history, error: historyError } = await supabase.rpc(
+    "purge_agent_history",
+    { p_call_days: 90, p_write_days: 1 },
+  );
+  const trimmed = (history ?? [])[0] as
+    | { purged_calls: number; purged_writes: number }
+    | undefined;
+
+  return NextResponse.json({
+    purged: purged.length,
+    days,
+    agent_calls_removed: trimmed?.purged_calls ?? 0,
+    agent_writes_removed: trimmed?.purged_writes ?? 0,
+    ...(historyError ? { agent_history_error: historyError.message } : {}),
+  });
 }

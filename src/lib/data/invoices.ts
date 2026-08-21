@@ -347,7 +347,7 @@ export type BillingTotals = {
 /**
  * Headline totals for the Overview: what has been collected, and how much each
  * ABN has billed. Both split into the current financial year and all time.
- * Bucketed by `invoice_date` — there is no separate payment date on record.
+ * Bucketed by `invoice_date`: there is no separate payment date on record.
  */
 export async function getBillingTotals(org: Org): Promise<BillingTotals> {
   const supabase = createAdminClient();
@@ -437,6 +437,42 @@ export async function createInvoice(
     throw new Error(`Failed to create invoice: ${error?.message}`);
   }
   return data as Invoice;
+}
+
+/**
+ * An invoice that already says exactly what this one would say: same client,
+ * same billing date, same total, not cancelled.
+ *
+ * This is the second net under an idempotency key, for the case where an agent
+ * retried without one or where somebody simply asked twice. It is deliberately
+ * a coincidence check and not a rule: a business really can bill the same
+ * client the same amount twice on one day, so what happens with this is a
+ * refusal the caller can override, never a silent merge.
+ */
+export async function findDuplicateInvoice(
+  orgId: string,
+  clientId: string,
+  invoiceDate: string,
+  total: number,
+): Promise<Invoice | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("client_id", clientId)
+    .eq("invoice_date", invoiceDate)
+    .eq("total", total.toFixed(2))
+    .neq("status", "cancelled")
+    .limit(1)
+    .maybeSingle();
+  // Never the reason a create fails: without this check the invoice would
+  // simply have been made.
+  if (error) {
+    console.error("duplicate check failed:", error.message);
+    return null;
+  }
+  return (data as Invoice) ?? null;
 }
 
 export type UpdateInvoiceInput = {

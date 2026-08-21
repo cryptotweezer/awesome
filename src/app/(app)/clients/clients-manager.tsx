@@ -5,6 +5,7 @@ import type { ClientWithIssuer, Issuer } from "@/lib/types";
 import {
   saveClientAction,
   deleteClientAction,
+  setClientActiveAction,
   type ActionState,
 } from "./actions";
 
@@ -85,8 +86,21 @@ export function ClientsManager({
                 className="hover:bg-slate-50 dark:hover:bg-slate-800"
               >
                 <td className="px-4 py-3">
-                  <div className="font-medium text-slate-900 dark:text-slate-100">
-                    {c.name}
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={
+                        c.is_active
+                          ? "font-medium text-slate-900 dark:text-slate-100"
+                          : "font-medium text-slate-400 dark:text-slate-500"
+                      }
+                    >
+                      {c.name}
+                    </span>
+                    {!c.is_active && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        Archived
+                      </span>
+                    )}
                   </div>
                   {c.email && (
                     <div className="text-xs text-slate-400 dark:text-slate-500">
@@ -125,6 +139,7 @@ export function ClientsManager({
                     >
                       Edit
                     </button>
+                    <ArchiveButton id={c.id} active={c.is_active} />
                     <DeleteButton id={c.id} name={c.name} />
                   </div>
                 </td>
@@ -321,6 +336,39 @@ function ClientDialog({
         </form>
       </div>
     </div>
+  );
+}
+
+/**
+ * Archiving is the answer for a client who has stopped using the business, and
+ * deleting almost never is: an archived client keeps every invoice they were
+ * ever sent and simply stops appearing where a new one is raised.
+ */
+function ArchiveButton({ id, active }: { id: string; active: boolean }) {
+  const [state, action, pending] = useActionState(setClientActiveAction, initial);
+
+  return (
+    <form action={action} className="flex items-center gap-1">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="active" value={active ? "false" : "true"} />
+      <button
+        type="submit"
+        disabled={pending}
+        title={
+          active
+            ? "Hide from new invoices. Nothing is lost."
+            : "Show in new invoices again."
+        }
+        className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800"
+      >
+        {pending ? "…" : active ? "Archive" : "Restore"}
+      </button>
+      {state.error && (
+        <span className="text-xs text-red-600 dark:text-red-400">
+          {state.error}
+        </span>
+      )}
+    </form>
   );
 }
 

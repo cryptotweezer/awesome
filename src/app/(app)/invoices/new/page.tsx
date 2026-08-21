@@ -14,6 +14,11 @@ export default async function NewInvoicePage() {
     getNextInvoiceNumber(org.id),
   ]);
 
+  // Archived clients are not offered: archiving exists precisely so that
+  // somebody the business no longer deals with stops appearing here. Their
+  // invoices are untouched.
+  const billable = clients.filter((c) => c.is_active);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -41,7 +46,7 @@ export default async function NewInvoicePage() {
       </div>
 
       <InvoiceForm
-        clients={clients}
+        clients={billable}
         issuers={issuers}
         today={todayInTimezone(org.timezone)}
         termsDays={org.terms_days}

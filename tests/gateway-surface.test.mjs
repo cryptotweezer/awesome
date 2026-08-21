@@ -35,6 +35,7 @@ const EXPECTED_TOOLS = [
   "create_backup",
   "create_client",
   "create_invoice",
+  "delete_client",
   "delete_invoice",
   "find_invoices",
   "fy_summary",

@@ -324,6 +324,56 @@ create table if not exists awesome.oauth_tokens (
     references awesome.orgs(id) on delete cascade
 );
 
+-- ---------------------------------------------------------------------
+--  What agents did, and what a retry must not do twice.
+--
+--  `agent_writes` remembers the answer a create already gave, keyed by a
+--  value the caller can reproduce. An agent whose request timed out
+--  retries with the same key and gets the SAME invoice back instead of
+--  raising a second one. Entries live a day: long enough for any retry.
+-- ---------------------------------------------------------------------
+create table if not exists awesome.agent_writes (
+  id              uuid        not null default gen_random_uuid(),
+  org_id          uuid        not null,
+  tool            text        not null,
+  idempotency_key text        not null,
+  result          jsonb       not null,
+  created_at      timestamptz not null default now(),
+  constraint agent_writes_pkey primary key (id),
+  -- What makes a retry safe. The org is part of it so two businesses can
+  -- use the same key value without ever seeing each other's answer.
+  constraint agent_writes_key_unique unique (org_id, tool, idempotency_key),
+  constraint agent_writes_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- Append-only log of every tool call, refusals included. The denials are
+-- the useful rows: a run of them is an agent asking for something it was
+-- never granted. Deliberately NOT stored: the arguments and the results.
+-- They are the business's data, and a log that duplicates the database is
+-- a second copy to protect for no gain.
+create table if not exists awesome.agent_calls (
+  id               uuid        not null default gen_random_uuid(),
+  org_id           uuid        not null,
+  at               timestamptz not null default now(),
+  -- The credential's own id, kept without a foreign key on purpose: a key
+  -- can be deleted, and the history of what it did must survive it.
+  credential_id    uuid,
+  credential_label text        not null,
+  via              text        not null,
+  tool             text        not null,
+  outcome          text        not null,
+  detail           text,
+  -- The one obvious record involved, when there is one (an invoice
+  -- number, a client's name).
+  target           text,
+  constraint agent_calls_pkey primary key (id),
+  constraint agent_calls_outcome_check check (outcome in ('ok', 'denied', 'error')),
+  constraint agent_calls_via_check check (via in ('key', 'oauth', 'session')),
+  constraint agent_calls_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
 create index if not exists oauth_codes_expiry_idx on awesome.oauth_codes (expires_at);
 create index if not exists oauth_tokens_org_idx   on awesome.oauth_tokens (org_id);
 create index if not exists oauth_tokens_live_idx  on awesome.oauth_tokens (org_id, created_at desc)
@@ -338,6 +388,9 @@ create index if not exists invoice_items_org_idx    on awesome.invoice_items (or
 create index if not exists invoices_org_status_idx  on awesome.invoices (org_id, status);
 create index if not exists invoices_org_date_idx    on awesome.invoices (org_id, invoice_date desc);
 create index if not exists invoices_org_paid_at_idx on awesome.invoices (org_id, paid_at) where status = 'paid';
+create index if not exists agent_calls_org_idx      on awesome.agent_calls (org_id, at desc);
+create index if not exists agent_calls_cred_idx     on awesome.agent_calls (credential_id, at desc);
+create index if not exists agent_writes_age_idx     on awesome.agent_writes (created_at);
 
 -- ---------------------------------------------------------------------
 --  Access. RLS on, no policies: service_role only, from the server only.
@@ -352,6 +405,8 @@ alter table awesome.agent_keys    enable row level security;
 alter table awesome.oauth_clients enable row level security;
 alter table awesome.oauth_codes   enable row level security;
 alter table awesome.oauth_tokens  enable row level security;
+alter table awesome.agent_writes  enable row level security;
+alter table awesome.agent_calls   enable row level security;
 
 -- Codes are worthless once used or expired, and a table of dead codes is a
 -- table nobody prunes.
@@ -367,6 +422,33 @@ begin
   delete from awesome.oauth_codes where expires_at < now() - interval '1 hour';
   get diagnostics removed = row_count;
   return removed;
+end $$;
+
+-- A log with no expiry becomes the biggest table in the database and
+-- nobody notices until it matters. Called daily by the same cron that
+-- purges dormant trials.
+create or replace function awesome.purge_agent_history(
+  p_call_days  integer default 90,
+  p_write_days integer default 1
+)
+returns table (purged_calls integer, purged_writes integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_calls  integer;
+  v_writes integer;
+begin
+  delete from awesome.agent_calls
+   where at < now() - make_interval(days => greatest(p_call_days, 1));
+  get diagnostics v_calls = row_count;
+
+  delete from awesome.agent_writes
+   where created_at < now() - make_interval(days => greatest(p_write_days, 1));
+  get diagnostics v_writes = row_count;
+
+  return query select v_calls, v_writes;
 end $$;
 
 grant usage on schema awesome to service_role;

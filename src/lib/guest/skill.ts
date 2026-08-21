@@ -148,7 +148,11 @@ ${limitsSection(org)}
   what the invoice already has.
 - \`mark_paid\`, \`mark_unpaid\`, \`cancel_invoice\`, \`reactivate_invoice\`.
 - \`delete_invoice\`: needs \`confirm: true\`, and only after the user has said so.
-- \`create_client\`, \`update_client\`.
+- \`create_client\`, \`update_client\`. To stop dealing with a client, archive
+  them: \`update_client\` with \`is_active: false\`. They keep every invoice they
+  were ever sent and stop appearing when a new one is raised.
+- \`delete_client\`: needs \`confirm: true\`, and only ever for a client entered
+  by mistake. One who has been invoiced cannot be deleted at all: archive them.
 
 **Documents**
 - \`get_invoice_pdf\`, \`get_client_statement\`, \`get_tax_statement\`.
@@ -171,7 +175,13 @@ ${limitsSection(org)}
 \`\`\`
 
 That is the whole thing. Name the client the way the user does; you do not need
-to look up an id first. The ${org.tax_id_label} billing is worked out for you,
+to look up an id first.
+
+If a create ever times out, do not guess whether it landed: retry it with the
+same \`idempotency_key\` (any stable string of your own) and you will be handed
+the original invoice back instead of raising a second one. Without a key, a
+second identical invoice for the same client, day and amount is refused, and
+the refusal names the invoice that already exists. The ${org.tax_id_label} billing is worked out for you,
 and \`invoice_date\` defaults to today here, which is usually right: the service
 date is the day the work happened, the invoice date is the day you bill it.
 

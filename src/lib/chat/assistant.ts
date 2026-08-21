@@ -1,5 +1,6 @@
 import "server-only";
 import { tools, type ToolContext, type ToolDef } from "@/lib/gateway/tools";
+import { runTool } from "@/lib/gateway/dispatch";
 import { resolveClient, resolveIssuer } from "@/lib/gateway/documents";
 import { getInvoiceByRef } from "@/lib/data/invoices";
 import { listIssuers } from "@/lib/data/issuers";
@@ -327,23 +328,26 @@ export async function runAssistant(
       } else if (!def) {
         result = JSON.stringify({ error: `No such tool: ${call.function.name}` });
       } else {
+        let args: Record<string, unknown> = {};
         try {
-          const args = call.function.arguments
-            ? JSON.parse(call.function.arguments)
-            : {};
-          // The same handler an agent key would reach, with the same org.
-          // `?? { ok: true }` because a handler that answers with nothing would
-          // serialise to no content at all, and a tool message without content
-          // is rejected by the chat API: the write lands and the turn 502s.
-          const value = await def.handler(args, ctx);
-          result = JSON.stringify(value ?? { ok: true });
-        } catch (e) {
-          // A refusal is information, not a crash: hand it back so the
-          // assistant can explain it instead of retrying blindly.
-          result = JSON.stringify({
-            error: e instanceof Error ? e.message : "The tool failed.",
-          });
+          args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+        } catch {
+          args = {};
         }
+        // The same dispatcher an agent key would reach, with the same org, so
+        // this assistant is logged and guarded exactly like anything else that
+        // acts on the business. `?? { ok: true }` because a handler that
+        // answers with nothing would serialise to no content at all, and a
+        // tool message without content is rejected by the chat API: the write
+        // lands and the turn 502s.
+        const outcome = await runTool(call.function.name, args, ctx.agent, {
+          registry: chatTools,
+        });
+        // A refusal is information, not a crash: hand it back so the assistant
+        // can explain it instead of retrying blindly.
+        result = outcome.ok
+          ? JSON.stringify(outcome.result ?? { ok: true })
+          : JSON.stringify({ error: outcome.error });
       }
 
       messages.push({

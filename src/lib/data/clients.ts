@@ -44,10 +44,18 @@ export async function createClient(
   return data as Client;
 }
 
+/**
+ * `is_active` is not part of `ClientInput` because it is not something a person
+ * types into the client form: it is a state the client is put into, from the
+ * list or by an agent. A client who no longer uses the business is archived,
+ * never deleted, so their invoices keep the name they were billed under.
+ */
+export type ClientPatch = Partial<ClientInput> & { is_active?: boolean };
+
 export async function updateClient(
   orgId: string,
   id: string,
-  input: Partial<ClientInput>,
+  input: ClientPatch,
 ): Promise<Client> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -93,4 +101,33 @@ export async function deleteClient(orgId: string, id: string): Promise<void> {
     .eq("org_id", orgId)
     .eq("id", id);
   if (error) throw new Error(`Failed to delete client: ${error.message}`);
+}
+
+/**
+ * Archive a client, or bring them back.
+ *
+ * Archiving is what should happen to a client who has stopped using the
+ * business: they disappear from the pickers where a new invoice is raised, and
+ * they stay everywhere their history is. Deleting is for a client entered by
+ * mistake, and only ever for one who has never been invoiced.
+ */
+export async function setClientActive(
+  orgId: string,
+  id: string,
+  active: boolean,
+): Promise<Client> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("clients")
+    .update({ is_active: active })
+    .eq("org_id", orgId)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) {
+    throw new Error(
+      `Failed to ${active ? "restore" : "archive"} client: ${error.message}`,
+    );
+  }
+  return data as Client;
 }

@@ -35,6 +35,11 @@ export default async function EditInvoicePage({
     })),
   };
 
+  // Archived clients are hidden, EXCEPT the one this invoice already belongs
+  // to: an archived client must not silently drop out of the form and re-save
+  // the invoice against somebody else.
+  const billable = clients.filter((c) => c.is_active || c.id === inv.client_id);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -56,7 +61,7 @@ export default async function EditInvoicePage({
       </div>
 
       <InvoiceForm
-        clients={clients}
+        clients={billable}
         issuers={issuers}
         today={todayInTimezone(org.timezone)}
         termsDays={org.terms_days}

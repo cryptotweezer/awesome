@@ -5,6 +5,7 @@ import {
   createClient,
   updateClient,
   deleteClient,
+  setClientActive,
   type ClientInput,
 } from "@/lib/data/clients";
 import { requireOrg } from "@/lib/data/org";
@@ -76,6 +77,35 @@ export async function deleteClientAction(
     return {
       ok: false,
       error: e instanceof Error ? e.message : "Delete failed.",
+    };
+  }
+  revalidatePath("/clients");
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/**
+ * Archive a client, or bring them back.
+ *
+ * This is what to do with a client who has stopped using the business, and it
+ * is why deleting one is so rarely the answer: archiving takes them out of the
+ * lists an invoice is raised from and leaves every invoice they were ever sent
+ * exactly where it is.
+ */
+export async function setClientActiveAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = str(formData, "id");
+  if (!id) return { ok: false, error: "Missing client id." };
+  const active = formData.get("active") === "true";
+  try {
+    const { org } = await requireOrg();
+    await setClientActive(org.id, id, active);
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Failed.",
     };
   }
   revalidatePath("/clients");

@@ -4,7 +4,8 @@ import {
   unauthorizedHeaders,
   type Agent,
 } from "@/lib/gateway/auth";
-import { authorizeTool, tools } from "@/lib/gateway/tools";
+import { tools } from "@/lib/gateway/tools";
+import { runTool } from "@/lib/gateway/dispatch";
 import { appBaseUrl } from "@/lib/app-url";
 import { protectGateway } from "@/lib/security/arcjet";
 
@@ -104,45 +105,36 @@ async function handle(msg: Incoming, agent: Agent): Promise<object | null> {
 
       case "tools/call": {
         const name = typeof params.name === "string" ? params.name : "";
-        const def = tools[name];
-        if (!def) return err(id, -32602, `Unknown tool "${name}"`);
-        // Scope check before the handler, in the one place both transports
-        // share, so a tool can never be the one that forgot.
-        const missing = authorizeTool(name, agent);
-        if (missing) {
+        if (!tools[name]) return err(id, -32602, `Unknown tool "${name}"`);
+
+        // The scope gate, the retry guard and the log all live in the one
+        // dispatcher both transports share, so a tool can never be the one
+        // that forgot. Here that leaves only the wire shape.
+        const args = (params.arguments ?? {}) as Record<string, unknown>;
+        const outcome = await runTool(name, args, agent);
+        if (!outcome.ok) {
+          // A refusal is a result with isError, not a protocol error: the
+          // model has to be able to read it and tell the person.
           return ok(id, {
             content: [
               {
                 type: "text",
-                text:
-                  `This connection is not allowed to ${missing}. ` +
-                  `Ask the owner to grant the "${missing}" permission, then reconnect.`,
+                text: outcome.denied
+                  ? `${outcome.error} Then reconnect.`
+                  : outcome.error,
               },
             ],
             isError: true,
           });
         }
-
-        const args = (params.arguments ?? {}) as Record<string, unknown>;
-        try {
-          const result = await def.handler(args, { agent });
-          // A handler that answers with nothing must still send text: an
-          // undefined `text` disappears in serialisation and the client is
-          // handed a content block with no content.
-          return ok(id, {
-            content: [
-              { type: "text", text: JSON.stringify(result ?? { ok: true }) },
-            ],
-          });
-        } catch (e) {
-          // A tool failure is a result with isError, not a protocol error.
-          return ok(id, {
-            content: [
-              { type: "text", text: e instanceof Error ? e.message : "Failed" },
-            ],
-            isError: true,
-          });
-        }
+        // A handler that answers with nothing must still send text: an
+        // undefined `text` disappears in serialisation and the client is
+        // handed a content block with no content.
+        return ok(id, {
+          content: [
+            { type: "text", text: JSON.stringify(outcome.result ?? { ok: true }) },
+          ],
+        });
       }
 
       default:
