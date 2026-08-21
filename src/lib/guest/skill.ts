@@ -87,7 +87,8 @@ description: >-
 
 You can read and change this business's billing data through a set of tools
 served over MCP. There is no other way in, and no way to reach anybody else's
-data: the key you are configured with belongs to this business alone.
+data: the connection you are using belongs to this business alone, whether it
+was approved in a browser or configured with a key.
 
 ## What this business is
 

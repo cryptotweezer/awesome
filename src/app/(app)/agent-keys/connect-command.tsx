@@ -16,7 +16,10 @@ const CLIENTS = [
     name: "Claude Code",
     line: (base: string, server: string) =>
       `claude mcp add --transport http ${server} ${base}/api/mcp --scope user`,
-    note: "Run it, then say /mcp and pick this server to authorise. Restart Claude Code afterwards.",
+    // The order matters and getting it wrong looks like a broken app: Claude
+    // Code reads its MCP list at startup, so /mcp does not show this server
+    // until it has been restarted once.
+    note: "Run it, restart Claude Code, then say /mcp and pick this server to authorise.",
   },
   {
     id: "codex",
@@ -58,7 +61,10 @@ export function ConnectCommand({
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
-      <div className="flex flex-wrap gap-1.5">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        Which assistant are you connecting?
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {CLIENTS.map((c) => (
           <button
             key={c.id}
@@ -88,6 +94,16 @@ export function ConnectCommand({
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
         {client.note}
+      </p>
+
+      <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+        Any assistant that speaks MCP can connect, not only these three. If yours
+        is not listed, point it at{" "}
+        <span className="font-mono text-slate-700 dark:text-slate-300">
+          {baseUrl}/api/mcp
+        </span>{" "}
+        as an HTTP MCP server with no header, and it will ask you to approve it
+        here.
       </p>
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
