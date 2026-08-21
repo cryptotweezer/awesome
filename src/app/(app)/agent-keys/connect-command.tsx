@@ -9,6 +9,12 @@ import { useState } from "react";
  * first, no file to download, no placeholder to substitute. The assistant
  * discovers where to authorise on its own and opens the browser, which is the
  * entire reason this path exists.
+ *
+ * The last option is the one that keeps this honest. Naming three assistants
+ * reads as a list of the assistants that work, and there are dozens: Cursor,
+ * Gemini, Copilot, whatever ships next month. What the app actually requires
+ * is an address and a transport, so the generic case says exactly that and is
+ * a tab like the others rather than a footnote under them.
  */
 const CLIENTS = [
   {
@@ -34,6 +40,14 @@ const CLIENTS = [
     line: (base: string, server: string) =>
       `{ "mcpServers": { "${server}": { "type": "http", "url": "${base}/api/mcp" } } }`,
     note: "Settings, Developer, Edit config. Paste inside the existing block, save, then quit and reopen Claude Desktop.",
+  },
+  {
+    id: "other",
+    name: "Any other AI",
+    // The address alone, because that is what every other client's form asks
+    // for: a name and a URL.
+    line: (base: string) => `${base}/api/mcp`,
+    note: "Add this as an MCP server over HTTP (some apps call it Streamable HTTP or a remote server), with NO authorisation header. It will send you here to approve it. If it wants a config file instead of a form, use the JSON on the Claude Desktop tab: it is the same thing.",
   },
 ] as const;
 
@@ -94,16 +108,6 @@ export function ConnectCommand({
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
         {client.note}
-      </p>
-
-      <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-        Any assistant that speaks MCP can connect, not only these three. If yours
-        is not listed, point it at{" "}
-        <span className="font-mono text-slate-700 dark:text-slate-300">
-          {baseUrl}/api/mcp
-        </span>{" "}
-        as an HTTP MCP server with no header, and it will ask you to approve it
-        here.
       </p>
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">

@@ -94,6 +94,11 @@ export default async function GuidePage() {
             finds its own way to an approval page here, where you choose what it
             is allowed to do.
           </p>
+          <p>
+            Any AI that speaks MCP works, not only the ones with a tab. If yours
+            is not there, <strong>Any other AI</strong> gives you the address to
+            paste into it.
+          </p>
           {/* The same picker the Agents page uses, rather than a second copy
               of one assistant's command: whoever reads this guide may not be
               using Claude at all, and a line that starts with `claude` reads
