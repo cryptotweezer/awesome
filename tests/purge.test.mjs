@@ -1,4 +1,5 @@
-// Deleting abandoned trial businesses, and never deleting anything else.
+// Deleting trial businesses on the 1st of the month, and never deleting
+// anything else.
 //
 //   node --env-file=.env.local --test tests/purge.test.mjs
 //
@@ -44,6 +45,20 @@ function purge(days, orgId) {
 
 /** A trial business, backdated so every activity signal looks ancient. */
 async function makeStaleOrg(name) {
+  const orgId = await makeFreshOrg(name);
+  await db
+    .from("orgs")
+    .update({
+      last_active_at: LONG_AGO,
+      created_at: LONG_AGO,
+      updated_at: LONG_AGO,
+    })
+    .eq("id", orgId);
+  return orgId;
+}
+
+/** A trial business created just now, the way somebody signing up gets one. */
+async function makeFreshOrg(name) {
   const userId = randomUUID();
   const { data, error } = await db.rpc("create_org", {
     p_user_id: userId,
@@ -54,15 +69,38 @@ async function makeStaleOrg(name) {
     p_tax_id: `7${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
   });
   assert.equal(error, null, error?.message);
-  await db
-    .from("orgs")
-    .update({
-      last_active_at: LONG_AGO,
-      created_at: LONG_AGO,
-      updated_at: LONG_AGO,
-    })
-    .eq("id", data.id);
   return data.id;
+}
+
+/**
+ * Every table that carries an org_id. Not the four the delete functions name:
+ * the whole list, because the point of the change on 2026-08-21 is that the
+ * other six leave by cascade and nobody has to remember them.
+ */
+const ORG_TABLES = [
+  "orgs",
+  "org_members",
+  "issuers",
+  "clients",
+  "invoices",
+  "invoice_items",
+  "agent_keys",
+  "agent_calls",
+  "agent_writes",
+  "oauth_codes",
+  "oauth_tokens",
+];
+
+async function assertNothingLeft(orgId, what) {
+  for (const table of ORG_TABLES) {
+    const column = table === "orgs" ? "id" : "org_id";
+    const { count, error } = await db
+      .from(table)
+      .select("*", { count: "exact", head: true })
+      .eq(column, orgId);
+    assert.equal(error, null, error?.message);
+    assert.equal(count, 0, `${table} still holds rows of the ${what} business`);
+  }
 }
 
 let awesomeBefore = null;
@@ -89,7 +127,6 @@ after(async () => {
     await db.from("invoices").delete().eq("org_id", org.id);
     await db.from("clients").delete().eq("org_id", org.id);
     await db.from("issuers").delete().eq("org_id", org.id);
-    await db.from("org_members").delete().eq("org_id", org.id);
     await db.from("orgs").delete().eq("id", org.id);
   }
 });
@@ -138,14 +175,7 @@ describe("an abandoned trial is removed completely", () => {
   });
 
   test("nothing of it is left behind", async () => {
-    for (const table of ["orgs", "org_members", "issuers", "clients", "invoices"]) {
-      const column = table === "orgs" ? "id" : "org_id";
-      const { count } = await db
-        .from(table)
-        .select("*", { count: "exact", head: true })
-        .eq(column, orgId);
-      assert.equal(count, 0, `${table} still holds rows of the purged business`);
-    }
+    await assertNothingLeft(orgId, "purged");
   });
 });
 
@@ -204,19 +234,12 @@ describe("closing your own account", () => {
     assert.equal(error, null, error?.message);
     assert.equal(name, "Purge Test Closing");
 
-    for (const table of ["orgs", "org_members", "issuers", "clients", "invoices"]) {
-      const column = table === "orgs" ? "id" : "org_id";
-      const { count } = await db
-        .from(table)
-        .select("*", { count: "exact", head: true })
-        .eq(column, orgId);
-      assert.equal(count, 0, `${table} still holds rows of the closed business`);
-    }
+    await assertNothingLeft(orgId, "closed");
   });
 });
 
-describe("a trial ends on its birthday, not when it goes quiet", () => {
-  test("a business that invoiced today is still purged once it is old enough", async () => {
+describe("being busy never saves a trial", () => {
+  test("a business that invoiced today is purged anyway", async () => {
     const orgId = await makeStaleOrg("Purge Test Working");
 
     const { data: issuers } = await db
@@ -250,22 +273,100 @@ describe("a trial ends on its birthday, not when it goes quiet", () => {
     );
   });
 
-  test("a trial created today is left alone", async () => {
-    const userId = randomUUID();
-    const { data, error } = await db.rpc("create_org", {
-      p_user_id: userId,
-      p_email: `purge-${userId.slice(0, 8)}@example.test`,
-      p_display_name: "Purge Test",
-      p_name: "Purge Test Fresh",
-      p_issuer_name: "Purge Test Fresh",
-      p_tax_id: `7${userId.replace(/\D/g, "").padEnd(10, "0").slice(0, 10)}`,
-    });
-    assert.equal(error, null, error?.message);
+  test("an age of 30 days still spares a trial that signed up today", async () => {
+    const orgId = await makeFreshOrg("Purge Test Fresh");
 
-    const { data: purged } = await purge(30, data.id);
+    const { data: purged } = await purge(30, orgId);
     assert.ok(
-      !(purged ?? []).some((r) => r.purged_org_id === data.id),
+      !(purged ?? []).some((r) => r.purged_org_id === orgId),
       "a business that signed up minutes ago was deleted",
     );
+  });
+});
+
+/**
+ * The monthly sweep: p_days = 0, which means every trial regardless of age.
+ * This is what the cron passes on the 1st, and the only value that ignores the
+ * sign-up date, so it is also the one that has to be proven harmless to Awesome.
+ */
+describe("the monthly sweep takes every trial, whatever its age", () => {
+  test("a trial that signed up minutes ago goes too", async () => {
+    const orgId = await makeFreshOrg("Purge Test Sweep");
+
+    const { data, error } = await purge(0, orgId);
+    assert.equal(error, null, error?.message);
+    assert.ok(
+      (data ?? []).some((r) => r.purged_org_id === orgId),
+      "the sweep left a trial behind",
+    );
+    await assertNothingLeft(orgId, "swept");
+  });
+
+  test("the deployment owner survives it, aimed straight at it", async () => {
+    const { data, error } = await purge(0, AWESOME_ORG_ID);
+    assert.equal(error, null, error?.message);
+    assert.deepEqual(data ?? [], [], "the sweep reached the deployment owner");
+
+    const { data: still } = await db
+      .from("orgs")
+      .select("id, name")
+      .eq("id", AWESOME_ORG_ID)
+      .maybeSingle();
+    assert.ok(still, "the deployment owner no longer exists");
+    assert.equal(still.name, awesomeBefore.name);
+
+    const { count } = await db
+      .from("invoices")
+      .select("*", { count: "exact", head: true })
+      .eq("org_id", AWESOME_ORG_ID);
+    assert.ok((count ?? 0) > 0, "the deployment owner lost its invoices");
+  });
+});
+
+/**
+ * Deleting a business names four tables and leaves the rest to ON DELETE
+ * CASCADE, which is only safe while every table with an org_id has that
+ * constraint. Nothing in Postgres enforces it, so this is the enforcement: a
+ * table added without it fails here, not in six months when the audit log has
+ * a million rows belonging to businesses that no longer exist.
+ */
+describe("no table can quietly keep the rows of a deleted business", () => {
+  test("every table with an org_id cascades from orgs", async () => {
+    const { data, error } = await db.rpc("org_cascade_gaps");
+    assert.equal(error, null, error?.message);
+    assert.deepEqual(
+      data ?? [],
+      [],
+      "a table carries org_id without a cascading foreign key to orgs",
+    );
+  });
+
+  test("the audit log and the retry guard leave with the business", async () => {
+    const orgId = await makeFreshOrg("Purge Test Trail");
+
+    // The two append-only tables, written by the gateway on every tool call.
+    // Neither is named by any delete: they leave by cascade or not at all.
+    const { error: callError } = await db.from("agent_calls").insert({
+      org_id: orgId,
+      credential_label: "Purge Test",
+      via: "key",
+      tool: "list_clients",
+      outcome: "ok",
+    });
+    assert.equal(callError, null, callError?.message);
+
+    const { error: writeError } = await db.from("agent_writes").insert({
+      org_id: orgId,
+      tool: "create_invoice",
+      idempotency_key: `purge-test-${orgId}`,
+      result: {},
+    });
+    assert.equal(writeError, null, writeError?.message);
+
+    const { data, error } = await purge(0, orgId);
+    assert.equal(error, null, error?.message);
+    assert.ok((data ?? []).some((r) => r.purged_org_id === orgId));
+
+    await assertNothingLeft(orgId, "swept");
   });
 });

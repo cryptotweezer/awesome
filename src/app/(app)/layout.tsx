@@ -8,7 +8,7 @@ import { AssistantWidget } from "@/components/assistant/assistant-widget";
 import { DashboardTour } from "@/components/tour/dashboard-tour";
 import { tourKey } from "@/components/tour/tour-key";
 import { createClient } from "@/lib/supabase/server";
-import { daysSince } from "@/lib/format";
+import { nextTrialPurge } from "@/lib/format";
 import { NavLinks } from "./nav-links";
 
 /**
@@ -159,7 +159,7 @@ async function TrialBanner({ orgId }: { orgId: string }) {
   const [org, invoices, clients] = await Promise.all([
     db
       .from("orgs")
-      .select("max_invoices, max_clients, created_at")
+      .select("max_invoices, max_clients")
       .eq("id", orgId)
       .single(),
     db.from("invoices").select("*", head).eq("org_id", orgId),
@@ -169,11 +169,9 @@ async function TrialBanner({ orgId }: { orgId: string }) {
   const maxInvoices = org.data?.max_invoices;
   const maxClients = org.data?.max_clients;
 
-  // Whole days left of the thirty, floored at zero: the purge runs once a day,
-  // so "0 days left" honestly means "any time now".
-  const daysLeft = org.data?.created_at
-    ? Math.max(0, 30 - daysSince(org.data.created_at))
-    : null;
+  // Every trial goes on the 1st, whatever day it signed up, so the countdown is
+  // to that date and not to a birthday.
+  const { daysLeft } = nextTrialPurge();
 
   return (
     <div className="border-b border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
@@ -191,9 +189,9 @@ async function TrialBanner({ orgId }: { orgId: string }) {
               .{" "}
             </>
           )}
-          {daysLeft == null
-            ? "Deleted 30 days after sign-up, used or not, so export anything you want to keep."
-            : `Deleted in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}, used or not, so export anything you want to keep.`}
+          {`Deleted on the 1st of the month, ${
+            daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`
+          }, used or not, so export anything you want to keep.`}
         </p>
         <Link href="/guide" className="shrink-0 font-semibold underline">
           Take it with you

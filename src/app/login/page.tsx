@@ -164,8 +164,8 @@ export default async function LoginPage({
                 body="Enough clients and invoices to bill a real month and see how it behaves, not a five-minute tour. What you have used is on your dashboard from the first screen."
               />
               <Card
-                title="Cleared out every 30 days"
-                body="Trial accounts are deleted automatically 30 days after sign-up. Nobody's business details sit on a server they stopped using, and a trial you forgot about cannot become a leak."
+                title="Cleared out on the 1st of every month"
+                body="Every trial account is deleted on the 1st, whatever day it signed up. Nobody's business details sit on a server they stopped using, and a trial you forgot about cannot become a leak."
               />
               <Card
                 title="Nothing is locked in"

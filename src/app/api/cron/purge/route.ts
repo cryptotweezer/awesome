@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { todayInSydney } from "@/lib/format";
 
 /**
- * Delete trial businesses a month after they were created, used or not.
+ * Delete every trial business on the 1st of the month, and trim the agent
+ * tables daily.
  *
  *   GET /api/cron/purge
  *   Authorization: Bearer $CRON_SECRET
@@ -16,11 +18,23 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * unprotected: until that variable is set, the schedule fires and nothing is
  * deleted, which is the safe way round.
  *
+ * Why a date and not an age: trials used to end a month after each sign-up,
+ * which meant up to a month of strangers' data in the database at any moment,
+ * on thirty different expiry dates. One date for everybody is smaller to hold
+ * and takes one sentence to explain. Awesome is not a trial (is_demo = false)
+ * and no argument here can reach it.
+ *
+ * The schedule stays daily because the second job below wants it, and because
+ * a monthly cron that fails has to wait a month for its next chance. Whether
+ * today is the 1st is decided in Sydney, not UTC: the cron fires at 15:00 UTC,
+ * which is already the next day there.
+ *
  * The logo files of the deleted businesses go with them, since object storage
  * is not covered by database cascades.
  *
- * It also trims the two append-only agent tables, which is unrelated to trials
- * but wants exactly the same daily schedule.
+ * Overrides, for running it by hand: `?days=30` purges trials older than that
+ * many days instead of sweeping, and `?sweep=1` sweeps on a day that is not
+ * the 1st.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -36,20 +50,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Not authorised." }, { status: 401 });
   }
 
-  const days = Number(new URL(request.url).searchParams.get("days") ?? 30);
+  const params = new URL(request.url).searchParams;
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase.rpc("purge_stale_demo_orgs", {
-    p_days: Number.isFinite(days) ? days : 30,
-  });
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  // 0 means "every trial, whatever its age", which is what the sweep is.
+  const asked = Number(params.get("days"));
+  const explicitDays = Number.isFinite(asked) && params.has("days") ? asked : null;
+  const isFirstOfMonth = todayInSydney().endsWith("-01");
+  const sweeping = explicitDays === null && (isFirstOfMonth || params.has("sweep"));
+  const days = explicitDays ?? (sweeping ? 0 : null);
 
-  const purged = (data ?? []) as {
-    purged_org_id: string;
-    purged_logo_path: string | null;
-  }[];
+  const purged: { purged_org_id: string; purged_logo_path: string | null }[] = [];
+  if (days !== null) {
+    const { data, error } = await supabase.rpc("purge_stale_demo_orgs", {
+      p_days: days,
+    });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    purged.push(...((data ?? []) as typeof purged));
+  }
 
   // Best effort: a leftover logo costs a few kilobytes, a failed purge costs a
   // database, so this never fails the request. The path comes back with the
@@ -64,10 +84,10 @@ export async function GET(request: Request) {
       .catch(() => undefined);
   }
 
-  // Same schedule, different reason: the agent log and the retry guard are
-  // append-only, so without an expiry they become the biggest tables in the
-  // database and nobody notices until it matters. This is not gated on the
-  // trial purge succeeding, and a failure here is reported, not fatal.
+  // Every day, sweep or not: the agent log and the retry guard are append-only,
+  // so without an expiry they become the biggest tables in the database and
+  // nobody notices until it matters. This is not gated on the purge succeeding,
+  // and a failure here is reported, not fatal.
   const { data: history, error: historyError } = await supabase.rpc(
     "purge_agent_history",
     { p_call_days: 90, p_write_days: 1 },
@@ -77,8 +97,9 @@ export async function GET(request: Request) {
     | undefined;
 
   return NextResponse.json({
+    swept: sweeping,
     purged: purged.length,
-    days,
+    ...(days === null ? {} : { days }),
     agent_calls_removed: trimmed?.purged_calls ?? 0,
     agent_writes_removed: trimmed?.purged_writes ?? 0,
     ...(historyError ? { agent_history_error: historyError.message } : {}),

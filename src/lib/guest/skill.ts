@@ -58,7 +58,13 @@ function limitsSection(org: Org): string {
 
 It is a trial, so it stops at ${caps.join(" and ")}. Past that the app refuses
 the write and says so; nothing breaks, and deleting something frees the space
-again. There is no limit on how much you and I talk: the allowance the
+again.
+
+The account itself is deleted on the 1st of the month, used or not. If the
+owner wants to keep any of this, tell them before then: \`create_backup\` hands
+them the whole business as one file.
+
+There is no limit on how much you and I talk: the allowance the
 dashboard mentions is for the little assistant built into the web app, which
 runs on the app owner's account. You are the user's own AI, and every call you
 make here is free of that.

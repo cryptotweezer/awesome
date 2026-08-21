@@ -1405,12 +1405,14 @@ begin
     raise exception 'delete_demo_org: % is not a trial business', p_org_id;
   end if;
 
+  -- These four have foreign keys between themselves (an invoice points at a
+  -- client and an issuer, neither of which cascades), so the order matters and
+  -- is spelled out. Everything else that carries an org_id leaves with the org
+  -- row below, by cascade, including tables that do not exist yet.
   delete from awesome.invoice_items where org_id = p_org_id;
   delete from awesome.invoices     where org_id = p_org_id;
   delete from awesome.clients      where org_id = p_org_id;
   delete from awesome.issuers      where org_id = p_org_id;
-  delete from awesome.agent_keys   where org_id = p_org_id;
-  delete from awesome.org_members  where org_id = p_org_id;
   delete from awesome.orgs         where id     = p_org_id;
 
   return v_name;
@@ -1418,22 +1420,59 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------
---  Trial businesses are deleted a month after they are created, used or not.
+--  Anything that carries an org_id and does NOT cascade from orgs, which
+--  should always be nothing.
 --
---  Activity is deliberately NOT part of the rule. These accounts exist so
---  people can try the app, and a busy one kept alive forever would mean this
---  database holding somebody's real clients and invoices forever. One month
---  from sign-up is also the only rule that fits in one sentence on a banner,
---  which matters more than cleverness when the outcome is deletion.
+--  Deleting a business is one delete on `orgs` plus the four ordered ones
+--  above; everything else leaves by cascade. That rests on every table with an
+--  org_id having the constraint, and nothing enforces it: a table created
+--  without one would silently keep the rows of businesses that no longer exist.
+--  This names them, so a test fails the day one appears instead of the day
+--  somebody notices the size of the database.
+-- ---------------------------------------------------------------------
+create or replace function awesome.org_cascade_gaps()
+returns table(table_name text, reason text)
+language sql stable
+set search_path to 'awesome', 'pg_catalog'
+as $$
+  select c.relname::text,
+         'no cascading foreign key to orgs'
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    join pg_attribute a on a.attrelid = c.oid and a.attname = 'org_id' and a.attnum > 0
+    left join pg_constraint fk
+           on fk.conrelid = c.oid
+          and fk.contype = 'f'
+          and fk.confrelid = 'awesome.orgs'::regclass
+          and fk.confdeltype = 'c'
+   where n.nspname = 'awesome'
+     and c.relkind = 'r'
+     and not a.attisdropped
+     and fk.conname is null;
+$$;
+
+-- ---------------------------------------------------------------------
+--  Trial businesses are deleted on the 1st of every month, used or not.
 --
---  The deletes are explicit and ordered rather than left to ON DELETE CASCADE:
---  cascading from `orgs` fans out to clients, issuers and invoices at once,
---  and the invoice -> client and invoice -> issuer foreign keys have no
---  cascade of their own, so the order it happened to pick could fail.
+--  Neither activity nor age is part of the rule. These accounts exist so people
+--  can try the app, and a busy one kept alive forever would mean this database
+--  holding somebody's real clients and invoices forever. One date for everybody
+--  is also the only rule that fits in one sentence on a banner, which matters
+--  more than cleverness when the outcome is deletion.
+--
+--  p_days = 0 is what the monthly sweep passes: every trial, whatever its age.
+--  Any other number means trials older than that many days, which is what the
+--  aimed calls in the test suite use.
+--
+--  The four tables below have foreign keys between themselves (an invoice
+--  points at a client and an issuer, neither of which cascades), so their
+--  order is spelled out. Everything else that carries an org_id leaves with
+--  the org row, by cascade: agent keys, members, the audit log, the retry
+--  guard, the OAuth tokens, and anything added later. See org_cascade_gaps().
 --
 --  p_org_id aims the purge at a single business. Left null it considers every
---  trial that qualifies, which is what the daily cron wants. It exists because
---  a test that calls this function unaimed deletes real accounts, and one did.
+--  trial that qualifies, which is what the cron wants. It exists because a test
+--  that calls this function unaimed deletes real accounts, and one did.
 -- ---------------------------------------------------------------------
 create or replace function awesome.purge_stale_demo_orgs(
   p_days   integer default 30,
@@ -1444,7 +1483,7 @@ language plpgsql security definer
 set search_path to 'awesome', 'pg_catalog'
 as $$
 declare
-  v_cutoff timestamptz := now() - make_interval(days => greatest(coalesce(p_days, 30), 1));
+  v_cutoff timestamptz := now() - make_interval(days => greatest(coalesce(p_days, 30), 0));
 begin
   return query
   with doomed as (
@@ -1468,12 +1507,6 @@ begin
   ),
   del_issuers as (
     delete from awesome.issuers s where s.org_id in (select id from doomed) returning 1
-  ),
-  del_keys as (
-    delete from awesome.agent_keys k where k.org_id in (select id from doomed) returning 1
-  ),
-  del_members as (
-    delete from awesome.org_members m where m.org_id in (select id from doomed) returning 1
   ),
   del_orgs as (
     delete from awesome.orgs o

@@ -221,8 +221,8 @@ AGENT_KEY_PEPPER=<any long random string>
 APP_URL=https://your-own-domain`}
           />
           <p>
-            On your own copy there are no trial limits, nothing is deleted after
-            30 days, and your data never leaves your account.
+            On your own copy there are no trial limits, nothing is deleted at
+            the end of the month, and your data never leaves your account.
           </p>
         </Step>
       </Section>
@@ -230,9 +230,9 @@ APP_URL=https://your-own-domain`}
       {org.is_demo && (
         <p className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900/50 dark:text-slate-400 dark:ring-slate-800">
           This is a trial account: up to {org.max_invoices} invoices and{" "}
-          {org.max_clients} clients, and it is deleted 30 days after you signed
-          up whether you used it or not. Export whenever you like, and install
-          your own copy when you are ready to bill for real.
+          {org.max_clients} clients, and it is deleted on the 1st of the month
+          whether you used it or not. Export whenever you like, and install your
+          own copy when you are ready to bill for real.
         </p>
       )}
     </div>

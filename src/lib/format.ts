@@ -39,6 +39,28 @@ export function todayInSydney(now: Date = new Date()): string {
   }).format(now);
 }
 
+/**
+ * When the next monthly sweep of trial accounts runs: the 1st of the coming
+ * month, decided in Sydney, which is where the cron decides what day it is.
+ *
+ * Today always counts as a day left, so the banner reads "1 day" on the last
+ * day and never "0 days": a trial is deleted at the start of the 1st, and
+ * telling somebody they have no time left while they still have hours of it is
+ * how a person skips the export they meant to do.
+ */
+export function nextTrialPurge(today: string = todayInSydney()): {
+  date: string;
+  daysLeft: number;
+} {
+  const [year, month, day] = today.split("-").map(Number);
+  const firstOfNext = Date.UTC(year, month, 1); // month is 1-based, so this is next
+  const now = Date.UTC(year, month - 1, day);
+  return {
+    date: new Date(firstOfNext).toISOString().slice(0, 10),
+    daysLeft: Math.round((firstOfNext - now) / 86_400_000),
+  };
+}
+
 export function formatAUD(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return "-";
   return `AUD ${amount.toFixed(2)}`;
