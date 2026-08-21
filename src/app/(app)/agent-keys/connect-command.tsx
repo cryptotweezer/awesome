@@ -37,6 +37,20 @@ const CLIENTS = [
   },
 ] as const;
 
+/**
+ * The name the MCP server gets in the person's own config. Lowercase and with
+ * no spaces, because it is typed on a command line, and named after their
+ * business so that somebody connected to two of these can tell them apart.
+ */
+export function serverName(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "billing"
+  );
+}
+
 export function ConnectCommand({
   baseUrl,
   server,

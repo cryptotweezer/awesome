@@ -4,7 +4,7 @@ import { listConnections } from "@/lib/oauth/store";
 import { appBaseUrl } from "@/lib/app-url";
 import { KeysManager } from "./keys-manager";
 import { Connections } from "./connections";
-import { ConnectCommand } from "./connect-command";
+import { ConnectCommand, serverName } from "./connect-command";
 import { Activity } from "./activity";
 import { listAgentCalls } from "@/lib/gateway/audit";
 
@@ -89,15 +89,5 @@ export default async function AgentKeysPage() {
         <Activity calls={calls} />
       </section>
     </div>
-  );
-}
-
-/** Lowercase, no spaces: it is typed on a command line. */
-function serverName(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "") || "billing"
   );
 }

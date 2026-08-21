@@ -3,6 +3,10 @@ import { orgForPage } from "@/lib/data/org";
 import { appBaseUrl } from "@/lib/app-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Step, AgentKit, CopyBlock } from "./guide-client";
+import {
+  ConnectCommand,
+  serverName,
+} from "../agent-keys/connect-command";
 
 /**
  * The setup guide, in three parts that are deliberately separated because
@@ -92,14 +96,17 @@ export default async function GuidePage() {
             finds its own way to an approval page here, where you choose what it
             is allowed to do.
           </p>
-          <CopyBlock text={`claude mcp add --transport http billing ${baseUrl}/api/mcp --scope user`} />
+          {/* The same picker the Agents page uses, rather than a second copy
+              of one assistant's command: whoever reads this guide may not be
+              using Claude at all, and a line that starts with `claude` reads
+              as a requirement. */}
+          <ConnectCommand baseUrl={baseUrl} server={serverName(org.name)} />
           <p>
-            That is Claude Code. Codex, Claude Desktop and anything else that
-            speaks MCP take the same address, and{" "}
+            Everything currently connected, and the keys, live on{" "}
             <Link href="/agent-keys" className="underline">
               Agents
-            </Link>{" "}
-            has the exact line for each, plus everything currently connected.
+            </Link>
+            .
           </p>
           <p>
             <strong>Use a key instead when there is no browser</strong>, which
@@ -116,10 +123,12 @@ export default async function GuidePage() {
           stepId="installed"
         >
           <p>
-            After running the command, tell your assistant to connect: Claude
-            Code lists the server under <code>/mcp</code>, and Codex opens the
-            browser the first time it calls a tool. You approve on a page here
-            that spells out what it will be able to do.
+            After running the command, tell your assistant to connect. Each one
+            asks in its own way: Claude Code lists the server under{" "}
+            <code>/mcp</code> once it has been restarted, Codex opens the
+            browser the first time it calls a tool, and anything else will say
+            it needs authorising. You approve on a page here that spells out
+            what it will be able to do.
           </p>
           <p>
             It learns how your business works by itself on its first question,
