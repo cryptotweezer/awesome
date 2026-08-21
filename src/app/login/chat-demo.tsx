@@ -25,8 +25,8 @@ const CONVERSATION: Line[] = [
   },
   {
     from: "agent",
-    text: "All done, Invoice #1954 for $180.00, due 31 July. I emailed it straight to Sarah.",
-    file: "Invoice-1954-Sarah.pdf",
+    text: "All done, Invoice #0034 for $180.00, due 31 July. I emailed it straight to Sarah.",
+    file: "Invoice-0034-Sarah.pdf",
   },
   { from: "you", text: "How did we do this month?" },
   {
@@ -38,7 +38,7 @@ const CONVERSATION: Line[] = [
 const MORE = [
   "Could you pull up the last few invoices for Acme?",
   "Can you get my tax statement ready for last financial year?",
-  "Mark invoice 1948 as paid, please",
+  "Mark invoice #0035 as paid, please",
   "Who has fallen behind on payments?",
   "How much have I billed this year, and all time?",
   "Back up everything for me, just in case",

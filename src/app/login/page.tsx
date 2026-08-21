@@ -7,16 +7,21 @@ import { ChatDemo } from "./chat-demo";
 import { Reveal, ScrollProgress, SectionLinks, CopyLine } from "./motion";
 
 /**
- * The public page: what this system is, and the two different ways an AI gets
- * to work inside it.
+ * The public page. It sells a service, so it says what the thing does for the
+ * reader and stops there: no rationale for how it was built, no clauses
+ * defending against objections nobody raised, no numbers that go stale (the
+ * trial's allowances are on the dashboard from the first screen).
  *
- * That distinction is the whole point of the page and it is the thing people
- * get wrong, so it is told in two sections rather than one. An assistant you
- * drive (Claude, Codex, Copilot, Gemini) connects with one command, approves
- * itself in the browser, and does what you ask while you are there. An agent that runs on its own (Hermes,
- * OpenClaw) connects exactly the same way, and everything extra it can do,
- * sending the email, waking up on a schedule, answering you on your phone,
- * comes from that agent's own setup, never from here.
+ * Order is the argument. Connecting your own AI comes first, because that is
+ * the reason to choose this over any other billing app, then the agents that
+ * run on their own, then the assistant built in for somebody who has neither.
+ *
+ * The distinction between those two is the thing people get wrong, so it gets
+ * its own section. An assistant you drive (Claude, Codex, Copilot, Gemini)
+ * connects with one line and approves in the browser, and works while you are
+ * there. An agent (Hermes, OpenClaw) connects the same way, and everything
+ * extra it does, sending the email, waking on a schedule, answering your
+ * phone, comes from that agent's own setup, never from here.
  */
 
 const MESSAGES: Record<string, string> = {
@@ -25,10 +30,20 @@ const MESSAGES: Record<string, string> = {
   blocked: "Too many sign-in attempts from here. Wait a minute and try again.",
 };
 
+/**
+ * The public copy of this system, for somebody who would rather run it on their
+ * own hosting and their own database. Null until that repository exists: the
+ * one being prepared carries none of Awesome, no demo account and no trial.
+ *
+ * To publish it, set this to the URL. Nothing else on the page needs touching:
+ * the section below turns into a link on its own.
+ */
+const REPO_URL: string | null = null;
+
 const NAV = [
-  { id: "assistant", label: "Assistant" },
   { id: "connect", label: "Connect your AI" },
   { id: "agents", label: "Agents" },
+  { id: "assistant", label: "Built in" },
 ];
 
 export default async function LoginPage({
@@ -83,18 +98,17 @@ export default async function LoginPage({
         {/* Hero */}
         <section className="py-20 sm:py-28">
           <Reveal>
-            <p className="mb-4 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
-              AI Billing System
+            <p className="mb-5 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Works with the AI you already use
             </p>
-            <h1 className="max-w-3xl text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl">
+            <h1 className="max-w-3xl text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">
               Invoicing an AI can actually run.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-600 dark:text-slate-400">
-              A complete billing dashboard with an assistant built into it, and
-              an open door for every AI you already use. Raise an invoice, find
-              out who owes you, chase what is late, pull a client statement or a
-              whole financial year for your accountant, by asking for it in
-              plain words.
+              Tell an AI to bill the job and it is billed. Invoices, reminders,
+              client statements and your whole financial year, from a sentence.
+              Bring the AI you already use, or use the one built in.
             </p>
           </Reveal>
 
@@ -118,15 +132,11 @@ export default async function LoginPage({
             </div>
 
             {/* Only promised when it is actually true. Signing up is opened by
-                the GUEST_SIGNUP environment variable, not by this deploy. The
-                trial's actual allowances are not printed here: the dashboard
-                shows them from the first screen, and a number on a landing page
-                is a number waiting to go out of date. */}
+                the GUEST_SIGNUP environment variable, not by this deploy. */}
             {signupOpen && (
               <p className="mt-5 max-w-xl text-sm text-slate-500 dark:text-slate-400">
-                Free to try with your own business details. A trial account
-                comes with room to invoice properly, and the dashboard tells you
-                what is left as you go.
+                Free to try with your own business details. Sign in with Google
+                and you are billing a minute later.
               </p>
             )}
           </Reveal>
@@ -136,216 +146,55 @@ export default async function LoginPage({
           </Reveal>
         </section>
 
-        {/* The trial. Described only where it can actually be taken up: on a
-            deployment with sign-up closed, this whole section would be an
-            invitation to a door that does not open. */}
-        {signupOpen && (
-          <Section
-            id="try"
-            eyebrow="The demo"
-            title="Try it with your own business, in a minute"
-            lead="Sign in with Google and the system sets up a business that is yours: your name, your logo, your payment terms, your tax details, your invoice numbering starting at #1. Nothing is shared with anybody else's account and nothing is a mock-up: every invoice you raise is a real, printable invoice."
-          >
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Card
-                title="Your business, not a sandbox"
-                body="Set your ABN, add an ACN if you are a company, switch GST on if you are registered, upload your logo. Everything you print carries it."
-              />
-              <Card
-                title="Real documents from the first minute"
-                body="Invoice PDFs, a reminder statement per client and a full financial-year statement for your accountant. Built when you ask for them, never stored."
-              />
-              <Card
-                title="An assistant included"
-                body="The built-in assistant comes with the trial, so you can create and chase invoices by asking, before you connect anything of your own."
-              />
-              <Card
-                title="Room to have a proper look"
-                body="Enough clients and invoices to bill a real month and see how it behaves, not a five-minute tour. What you have used is on your dashboard from the first screen."
-              />
-              <Card
-                title="Cleared out on the 1st of every month"
-                body="Every trial account is deleted on the 1st, whatever day it signed up. Nobody's business details sit on a server they stopped using, and a trial you forgot about cannot become a leak."
-              />
-              <Card
-                title="Nothing is locked in"
-                body="Download everything as JSON or Excel whenever you like. The source is public and the database is one SQL file, so you can run the whole thing on your own accounts."
-              />
-            </div>
-          </Section>
-        )}
-
-        {/* The dashboard assistant */}
-        <Section
-          id="assistant"
-          eyebrow="Built in"
-          title="An assistant that sits inside the dashboard"
-          lead="Not a chat bolted onto the side. It runs the very same guarded functions the forms do, so whatever it says it did, it did, and it shows up on your dashboard a second later."
-        >
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Card
-              title="Raise an invoice from a sentence"
-              body={`"Invoice that client for yesterday's job, $150, and note that they are paying next week." It works out the client, the rate, the day the work was done and the due date, and asks when it is not sure.`}
-            />
-            <Card
-              title="Keep the books moving"
-              body="Mark an invoice paid or unpaid, cancel one that went out wrong, bring a cancelled one back, correct a line. Deleting is the one thing it will not do without asking you first."
-            />
-            <Card
-              title="Answer the money questions"
-              body="Who owes you, what is overdue and by how many days, what you billed this month or this financial year, how one client's account stands, how much GST you have collected this quarter."
-            />
-            <Card
-              title="Hand you the documents"
-              body="Ask for an invoice, a client statement or your financial-year tax statement and it gives you the file, ready to open. Same for a full backup of the business."
-            />
-            <Card
-              title="Look after your clients"
-              body="Add one, fix an address, change the rate you charge. A rate change applies to what you bill from now on and never rewrites an invoice already sent."
-            />
-            <Card
-              title="In your own language"
-              body="It answers in whatever language you write in, and it works out dates like yesterday or last Tuesday in your business's time zone, not in whatever zone the server is in."
-            />
-          </div>
-
-          <div className="mt-6 rounded-2xl bg-slate-50 p-6 dark:bg-slate-900">
-            <h3 className="font-semibold">
-              Ask it to send something and you get it, ready to send
-            </h3>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-              Ask for an invoice or a client&apos;s statement and your copy of
-              the finished document comes back in the chat, made at that moment
-              and correct as of that moment, ready to attach to an email and go.
-              To have it leave on its own instead, give the job to an{" "}
-              <a
-                href="#agents"
-                className="font-medium underline underline-offset-2"
-              >
-                agent with its own mailbox
-              </a>
-              .
-            </p>
-          </div>
-        </Section>
-
-        {/* Connect your own AI */}
+        {/* Connect your own AI. First section on the page on purpose: it is the
+            reason to choose this over any other billing app. */}
         <Section
           id="connect"
           eyebrow="Your own AI"
-          title="Connect the assistant you already use"
-          lead="One command, then approve it in your browser. No key to copy, nothing to download, nothing to configure. The app is the gateway: every AI reaches your books through the same door and inherits every rule underneath it. Claude Code, Claude Desktop, Codex, Copilot CLI, Gemini, Cursor: whatever speaks MCP over HTTP is already compatible."
+          title="Bring the AI you already use"
+          lead="One line to connect, one click to approve. Claude, Codex, Copilot, Gemini, Cursor: if it speaks MCP, it can bill for you."
         >
           <ol className="grid gap-4 lg:grid-cols-3">
             <Step
               n="1"
-              title="Run one command"
-              body="Point your assistant at the app. No key to generate, nothing to paste in, nothing to download."
+              title="Paste one line"
+              body="It tells your assistant where your books live. Every assistant has its own line, and the app writes it for you."
             />
             <Step
               n="2"
               title="Approve it in your browser"
-              body="A page here shows which assistant is asking and exactly what it will be able to do. Untick anything you would rather it could not, and confirm."
+              body="You see which assistant is asking and what it will be able to do. Untick anything you would rather it could not."
             />
             <Step
               n="3"
               title="Ask it for something"
-              body={`"What am I owed?" is the usual first question. It reads how your business works by itself, so there is no setup after this.`}
+              body={`"What am I owed?" is the usual first question. Nothing to set up first: it reads how your business works on its own.`}
             />
           </ol>
 
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <div className="rounded-2xl p-6 ring-1 ring-slate-200 lift dark:ring-slate-800">
-              <h3 className="font-semibold">How it knows your business</h3>
+              <h3 className="font-semibold">The whole connection</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                On its first question it asks the app how things work here, and
-                gets back your printed name, your ABN, your payment terms, your
-                time zone, the rules it is not allowed to bend and the full list
-                of tools. Nothing to install: the briefing comes down the same
-                connection.
+                This is Claude Code. Codex, Claude Desktop and everything else
+                get their own line inside the app.
               </p>
-              <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                You can also download it as a folder, which is the same text as
-                files. Worth it if you would rather read it before trusting it,
-                or want your assistant to keep it loaded permanently:
-              </p>
-              <ul className="mt-4 space-y-1.5 text-sm text-slate-600 dark:text-slate-400">
-                <li>
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
-                    SKILL.md
-                  </code>{" "}
-                  what your business is and how to bill for it
-                </li>
-                <li>
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
-                    INSTALL.md
-                  </code>{" "}
-                  the exact commands, per assistant
-                </li>
-                <li>
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
-                    mcp-config.json
-                  </code>{" "}
-                  the connection, ready to paste
-                </li>
-                <li>
-                  <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs dark:bg-slate-800">
-                    references/
-                  </code>{" "}
-                  how the gateway works, and a curl to test it
-                </li>
-              </ul>
-              <p className="mt-4 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                Installing it is copying that folder where your assistant keeps
-                its skills, <code className="text-xs">~/.claude/skills/</code>{" "}
-                or <code className="text-xs">~/.codex/skills/</code>, or
-                uploading it in Claude Desktop.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-2xl p-6 ring-1 ring-slate-200 lift dark:ring-slate-800">
-                <h3 className="font-semibold">One command, as an example</h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                  This is the whole connection for Claude Code. Codex takes
-                  three lines of TOML, Claude Desktop a small JSON block, and
-                  both are written out for you in the kit.
-                </p>
-                <div className="mt-4">
-                  <CopyLine
-                    text={`claude mcp add --transport http billing \\\n  ${baseUrl}/api/mcp \\\n  --header "Authorization: Bearer YOUR_KEY" --scope user`}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl p-6 ring-1 ring-slate-200 lift dark:ring-slate-800">
-                <h3 className="font-semibold">Or from any script</h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-                  Every tool is also one plain HTTP call, for anything that does
-                  not speak MCP. A server or a cron job has no browser to
-                  approve anything in, so that is what keys are for.
-                </p>
-                <div className="mt-4">
-                  <CopyLine
-                    text={`curl -X POST ${baseUrl}/api/agent/business_snapshot \\\n  -H "Authorization: Bearer YOUR_KEY" \\\n  -H "content-type: application/json" -d '{}'`}
-                  />
-                </div>
+              <div className="mt-4">
+                <CopyLine
+                  text={`claude mcp add --transport http billing \\\n  ${baseUrl}/api/mcp --scope user`}
+                />
               </div>
             </div>
-          </div>
 
-          <div className="mt-6 rounded-2xl bg-slate-50 p-6 dark:bg-slate-900">
-            <h3 className="font-semibold">
-              What a connected assistant can and cannot reach
-            </h3>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-              It calls billing tools on your business and nothing else. It
-              cannot run SQL, cannot name a table, cannot see another business,
-              and cannot reach anything outside billing. You choose what each one
-              is allowed to do when you approve it: look only, or also create and
-              edit, or also delete. Cutting one off takes a couple of seconds and
-              stops it immediately, with every other assistant still working.
-            </p>
+            <div className="rounded-2xl bg-slate-50 p-6 dark:bg-slate-900">
+              <h3 className="font-semibold">It only ever touches billing</h3>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                Your clients and your invoices, nothing else. You decide
+                whether an assistant can look, or also create and edit, or also
+                delete. Cutting one off takes a second and the rest keep
+                working.
+              </p>
+            </div>
           </div>
         </Section>
 
@@ -353,69 +202,56 @@ export default async function LoginPage({
         <Section
           id="agents"
           eyebrow="Agents"
-          title="Or hand it to an agent that runs on its own"
-          lead="An assistant works while you are in front of it. An agent lives on a machine of its own, with its own inbox, its own schedule and its own chat with you. Both connect here in exactly the same way, with a key and the skill. The difference is what the agent can do around the billing."
+          title="Or let an agent run it while you work"
+          lead="An assistant works while you are in front of it. An agent lives on a machine of its own, with its own inbox and its own schedule, and answers you in your messaging app."
         >
           <div className="grid gap-4 lg:grid-cols-2">
             <Compare
               kind="Assistants you drive"
               names="Claude Code · Claude Desktop · Codex · Copilot CLI · Gemini · Cursor"
               points={[
-                "You ask, it does it, the file comes back in your chat.",
+                "You ask, it does it, the file lands in your chat.",
                 "Runs where you already work: your terminal, your editor, your desktop.",
-                "One command and a click to approve. No key changes hands.",
-                "Nothing happens when you are not there, which is often exactly what you want.",
+                "Nothing happens while you are away, which is often what you want.",
               ]}
             />
             <Compare
               kind="Agents that run by themselves"
               names="Hermes · OpenClaw · anything self-hosted"
               points={[
-                "Lives on a server or a phone bot and answers you in your messaging app.",
-                "Has its own email, so it can actually send the invoice to your client.",
-                "Can be put on a schedule: bill the same clients on the 1st, chase overdue every Monday.",
-                "Connects with a key instead, because a server has no browser to approve anything in. Same tools, same rules.",
+                "Answers you from your phone, in the messaging app you already use.",
+                "Sends the invoice to your client from its own email.",
+                "Bills on the 1st and chases on Monday without being asked.",
               ]}
               highlight
             />
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
             <Card
               title="Invoices that send themselves"
-              body="The app prepares the recipient, the message and the attachment; the agent sends it from its own mail. Your client gets the bill without you opening anything."
+              body="The app writes it, the agent emails it. Your client gets the bill without you opening a laptop."
             />
             <Card
               title="Billing on a schedule"
-              body="A cron job on the agent's side: the monthly invoices go out on the 1st, the overdue reminders on Monday morning, the tax statement at the end of the year."
-            />
-            <Card
-              title="Your whole business from your phone"
-              body="Message the agent between jobs and it invoices, chases, answers and sends the PDF back into the chat. No dashboard, no laptop."
+              body="The monthly invoices on the 1st, the overdue chase on Monday morning, the tax statement in July."
             />
             <Card
               title="Work you never see"
-              body="It can watch what is falling behind and tell you, rather than waiting for you to ask. You hear about the account that went quiet."
+              body="It watches what is falling behind and tells you, instead of waiting to be asked."
             />
           </div>
 
-          <p className="mt-6 max-w-3xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-            All of that depends on how you set that agent up: its email account,
-            its scheduler, its permissions, what you allow it to do on its own.
-            This app never sends an email and never runs a job by itself, and
-            that is on purpose. What it does guarantee is the part underneath:
-            the same numbering, the same confirmation before a deletion, the
-            same frozen prices on invoices already sent, no matter which agent
-            is asking.
+          <p className="mt-6 max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            How far an agent goes is up to how you set it up. The billing rules
+            underneath never move, whichever one is asking.
           </p>
 
           <div className="mt-10">
-            <h3 className="text-lg font-semibold">
-              What that looks like in practice
-            </h3>
+            <h3 className="text-lg font-semibold">A morning, handled</h3>
             <p className="mt-2 max-w-2xl text-slate-600 dark:text-slate-400">
-              A morning with an agent on your phone, doing the parts you would
-              otherwise sit down for.
+              The parts you would otherwise sit down for, done before you finish
+              your coffee.
             </p>
             <div className="mt-6">
               <ChatDemo />
@@ -423,62 +259,55 @@ export default async function LoginPage({
           </div>
         </Section>
 
-        {/* Output */}
+        {/* The dashboard assistant */}
         <Section
-          eyebrow="What you get"
-          title="Everything your books need, on request"
-          lead="Built from one set of records at the moment you ask, so two answers can never disagree with each other."
+          id="assistant"
+          eyebrow="Built in"
+          title="No AI of your own? One is already inside"
+          lead="It sits in the dashboard and does the same work on the same records, so whatever it says it did shows up a second later."
         >
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Card
-              title="Answers, just by asking"
-              body="Who owes you, what is overdue, what you billed this month, this financial year, or all time, and the GST inside it. No dashboards to build."
+              title="Bill from a sentence"
+              body={`"Invoice that client for yesterday's job, $150." It works out the client, the rate, the day the work was done and the due date, and asks when it is not sure.`}
             />
             <Card
-              title="Invoices, ready to send"
-              body="Numbered, filed and printed the second you ask for one, with your logo and your details on them."
+              title="Answer the money questions"
+              body="Who owes you, what is overdue and by how long, what you billed this year, how much GST you have collected."
             />
             <Card
-              title="Your whole billing history"
-              body="Every invoice you have ever raised, in one list you can filter by client, status or date. Unpaid on top, paid and cancelled below."
+              title="Hand you the documents"
+              body="An invoice, a client statement or your whole financial year, ready to open and send."
             />
             <Card
-              title="Reminders that write themselves"
-              body="One statement per client showing everything they still owe, ready to send the moment an account starts falling behind."
-            />
-            <Card
-              title="Tax time, already sorted"
-              body="A full financial year of invoices for one ABN, in a single file you can hand straight to your accountant."
-            />
-            <Card
-              title="A backup whenever you want one"
-              body="Every client, invoice and line item in a single file, from the dashboard or by asking. Keep it wherever you trust."
+              title="In your own language"
+              body="Write to it in any language. Say yesterday or last Tuesday and it lands on the right day."
             />
           </div>
         </Section>
 
-        {/* Manual */}
+        {/* Output */}
         <Section
-          eyebrow="Or do it yourself"
-          title="The AI is optional. The system is not."
-          lead="Underneath the assistants sits a complete billing dashboard. Anything an AI can do, you can do by hand, and the two work on exactly the same records."
+          eyebrow="What you get"
+          title="Everything your books need"
+          lead="Ask for it, or click for it. There is a full dashboard underneath: raise, edit, cancel and mark paid by hand whenever you would rather."
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card
-              title="Raise invoices by hand"
-              body="Pick a client and the price and service fill themselves in. Add a line for every extra the job needed and watch the total build."
+              title="Invoices, ready to send"
+              body="Numbered, filed and printed with your logo the second you ask for one."
             />
             <Card
-              title="Change anything, later"
-              body="Fix a date, a price or a line on an invoice already raised. Cancel one that went out wrong, or delete one that should never have existed."
+              title="Reminders that write themselves"
+              body="One statement per client with everything they still owe, the moment an account falls behind."
             />
             <Card
-              title="Manage your clients"
-              body="Add new ones, update an address, set the rate you charge each of them. Future invoices pick it up automatically."
+              title="Tax time, sorted"
+              body="A full financial year in a single file you hand straight to your accountant."
             />
             <Card
-              title="Keep the books current"
-              body="Mark an invoice paid the moment the money lands, and every total on your dashboard moves with it."
+              title="Your data, whenever"
+              body="Every client and invoice as an Excel workbook or a JSON file, in one click."
             />
           </div>
         </Section>
@@ -486,45 +315,33 @@ export default async function LoginPage({
         {/* Safety */}
         <Section
           eyebrow="Safety"
-          title="Built to hand an agent the keys"
-          lead="Letting software raise invoices only works if the rules sit underneath it. These are enforced by the system itself, not by asking the AI nicely."
+          title="Built to hand an AI the keys"
+          lead="The rules that keep the numbers right live in the system, not in a prompt."
         >
           <ul className="grid gap-x-10 gap-y-6 sm:grid-cols-2">
             <Guard
-              title="Only you can see your data"
-              detail="Access is locked at the database engine. Every read and write happens on the server with a key the browser never receives."
+              title="Only you reach your books"
+              detail="Every read and write happens on the server, with a key your browser never sees."
             />
             <Guard
-              title="Every business is on its own"
-              detail="Your records are separated at the database level, not by a filter in the code. One business can never read another's."
+              title="Two invoices never share a number"
+              detail="Numbers are handed out one at a time, so you and an agent asking in the same second still get different ones."
             />
             <Guard
-              title="Two invoices can never share a number"
-              detail="Numbering is handed out by the database one at a time, so you and an agent working the same second still get different numbers."
+              title="It asks before it deletes"
+              detail="Everything else can be undone. Deleting an invoice needs a human yes first."
             />
             <Guard
-              title="The AI asks before it deletes"
-              detail="Every other action can be undone. Deleting an invoice is the one thing that needs a human yes first."
+              title="Invoices you sent never change"
+              detail="The price, the address and the tax details are frozen the day it goes out. Change them and only future invoices move."
             />
             <Guard
-              title="Every agent has its own key"
-              detail="Each assistant gets a key you hand out and can take back on its own. Retire one and the rest keep working, untouched."
-            />
-            <Guard
-              title="Invoices you already sent never change"
-              detail="The price, the address and the tax details are captured onto the invoice the day it goes out. Changing them affects what you bill next, never what you billed."
+              title="Every AI has its own key"
+              detail="Cut one off and it stops immediately, with every other one still working."
             />
             <Guard
               title="No passwords to steal"
               detail="You sign in with Google. The system stores no passwords at all."
-            />
-            <Guard
-              title="Your numbers cannot go stale"
-              detail="Balances and overdue dates are worked out the moment you look at them, rather than saved once and left to drift."
-            />
-            <Guard
-              title="Nothing left lying around"
-              detail="Invoices and statements are built when you ask and discarded after. There is no folder of sensitive files waiting to leak."
             />
           </ul>
         </Section>
@@ -537,6 +354,45 @@ export default async function LoginPage({
             </h2>
             <div className="mt-7 w-full max-w-xs">
               <LoginButton />
+            </div>
+          </Reveal>
+        </section>
+
+        {/* Self-hosting */}
+        <section className="border-t border-slate-200 py-16 dark:border-slate-800">
+          <Reveal>
+            <div className="rounded-3xl bg-slate-50 p-8 ring-1 ring-slate-200 sm:p-10 dark:bg-slate-900/60 dark:ring-slate-800">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+                Open source
+              </p>
+              <h2 className="mt-3 max-w-2xl text-2xl font-bold tracking-tight">
+                Or run it inside your own company
+              </h2>
+              <p className="mt-3 max-w-2xl leading-relaxed text-slate-600 dark:text-slate-400">
+                Take the whole system, put it on your own hosting and your own
+                database, and it is yours: your branding, your rules, your data,
+                no limits and nothing expiring. Same dashboard, same assistant,
+                same door for every AI.
+              </p>
+
+              <div className="mt-6">
+                {REPO_URL ? (
+                  <a
+                    href={REPO_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                  >
+                    Get the code
+                    <span aria-hidden="true">→</span>
+                  </a>
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-medium text-slate-500 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:ring-slate-800">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    The public repository is on its way
+                  </span>
+                )}
+              </div>
             </div>
           </Reveal>
         </section>

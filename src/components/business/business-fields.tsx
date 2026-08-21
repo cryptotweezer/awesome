@@ -423,7 +423,13 @@ export function BusinessFields({
         </label>
       </Card>
 
-      {editing && (
+      {/* Not on a trial. Somebody trying the app is here to see whether it
+          bills, and this asks them to decide how they price their work before
+          they have raised a single invoice. Left off, which is what a trial
+          already defaults to, the client form asks who the client is and the
+          price is set on each invoice line, which needs no explanation. A
+          business that agrees rates in advance turns it on once it is real. */}
+      {editing && !org?.is_demo && (
         <Card
           title="How you bill"
           hint="Only about how much the forms fill in for you. Nothing here changes an invoice that already exists."

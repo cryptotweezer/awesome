@@ -117,10 +117,20 @@ export async function saveSettingsAction(
       payment_note: str(form, "payment_note"),
       terms_days: termsDays,
       timezone: str(form, "timezone") ?? org.timezone,
-      // Empty means the work is described line by line, which is why this is
+      // "How you bill" is not shown to a trial, so its two fields are absent
+      // from that form and must keep whatever the business already has. A
+      // checkbox is missing when unticked as well as when unrendered, so the
+      // text field next to it is what says which of the two happened.
+      //
+      // Empty means the work is described line by line, which is why it is
       // stored as "" and not as null: there is no third state.
-      default_service_description: str(form, "default_service_description") ?? "",
-      per_client_defaults: form.get("per_client_defaults") === "on",
+      ...(form.has("default_service_description")
+        ? {
+            default_service_description:
+              str(form, "default_service_description") ?? "",
+            per_client_defaults: form.get("per_client_defaults") === "on",
+          }
+        : {}),
       // Only ever decides how NEW invoices are issued: each one freezes the
       // rate it was created under.
       gst_registered: form.get("gst_registered") === "on",
