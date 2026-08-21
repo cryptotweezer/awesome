@@ -89,15 +89,10 @@ export default async function GuidePage() {
       >
         <Step n={4} title="Connect your assistant" done={hasKeys}>
           <p>
-            Run one command and approve it in your browser. There is no key to
-            create, nothing to paste and nothing to download: your assistant
-            finds its own way to an approval page here, where you choose what it
-            is allowed to do.
-          </p>
-          <p>
-            Any AI that speaks MCP works, not only the ones with a tab. If yours
-            is not there, <strong>Any other AI</strong> gives you the address to
-            paste into it.
+            Paste the block below to whichever AI you use and it connects
+            itself, then sends you to a page here where you approve it and
+            choose what it is allowed to do. There is no key to create and
+            nothing to download.
           </p>
           {/* The same picker the Agents page uses, rather than a second copy
               of one assistant's command: whoever reads this guide may not be

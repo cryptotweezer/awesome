@@ -51,6 +51,36 @@ const CLIENTS = [
   },
 ] as const;
 
+/**
+ * The one thing that genuinely works everywhere: not a command, a request.
+ *
+ * There is no universal `mcp add`. Every CLI ships its own binary and the
+ * desktop apps have no command at all, so any single line printed here is
+ * wrong for most readers. What every capable assistant CAN do is add a server
+ * to its own configuration when told the address and the transport, which
+ * makes the portable artefact a short prompt rather than a shell command.
+ *
+ * Written as instructions to the assistant, not about it, because that is how
+ * it will be pasted.
+ */
+function connectPrompt(base: string, server: string): string {
+  return [
+    `Connect yourself to my billing app. It is an MCP server:`,
+    ``,
+    `  name:      ${server}`,
+    `  url:       ${base}/api/mcp`,
+    `  transport: HTTP (also called Streamable HTTP, or a remote server)`,
+    `  auth:      OAuth. No API key, no headers.`,
+    ``,
+    `Add it to your own MCP configuration, then authorise it: you will be given`,
+    `a link to open, and I approve it in my browser. Tell me if you need to be`,
+    `restarted before it shows up.`,
+    ``,
+    `Once you are connected, call the get_started tool before anything else. It`,
+    `explains the business and the rules you have to follow.`,
+  ].join("\n");
+}
+
 export function ConnectCommand({
   baseUrl,
   server,
@@ -59,22 +89,40 @@ export function ConnectCommand({
   server: string;
 }) {
   const [active, setActive] = useState<string>(CLIENTS[0].id);
-  const [copied, setCopied] = useState(false);
+  const [manual, setManual] = useState(false);
   const client = CLIENTS.find((c) => c.id === active) ?? CLIENTS[0];
   const text = client.line(baseUrl, server);
 
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
-  }
-
   return (
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        Paste this to your AI
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+        Whichever one you use. It connects itself and sends you back here to
+        approve it.
+      </p>
+
+      <CopyBox text={connectPrompt(baseUrl, server)} />
+
+      <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+        Then approve it in the browser and ask it{" "}
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          &ldquo;what am I owed?&rdquo;
+        </span>{" "}
+        to check. It reads how this business works by itself the first time, so
+        there is nothing to install.
+      </p>
+
+      <button
+        onClick={() => setManual((m) => !m)}
+        className="mt-4 text-xs font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+      >
+        {manual ? "Hide" : "Or add it yourself, by hand"}
+      </button>
+
+      {manual && (
+        <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         Which assistant are you connecting?
       </p>
@@ -94,30 +142,42 @@ export function ConnectCommand({
         ))}
       </div>
 
-      <div className="mt-4 flex items-start gap-3 rounded-xl bg-slate-950 p-4">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-slate-100">
-          {text}
-        </code>
-        <button
-          onClick={copy}
-          className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
+      <CopyBox text={text} />
 
       <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
         {client.note}
       </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
-      <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-        Once it is connected, ask it{" "}
-        <span className="font-medium text-slate-700 dark:text-slate-300">
-          &ldquo;what am I owed?&rdquo;
-        </span>{" "}
-        to check. It reads how this business works by itself the first time, so
-        there is nothing to install.
-      </p>
+/** A block of text with its own Copy button. Two of these on the page. */
+function CopyBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 flex items-start gap-3 rounded-xl bg-slate-950 p-4">
+      <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-slate-100">
+        {text}
+      </code>
+      <button
+        onClick={copy}
+        className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
