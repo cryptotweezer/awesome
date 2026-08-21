@@ -3,10 +3,8 @@ import { orgForPage } from "@/lib/data/org";
 import { appBaseUrl } from "@/lib/app-url";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Step, AgentKit, CopyBlock } from "./guide-client";
-import {
-  ConnectCommand,
-  serverName,
-} from "../agent-keys/connect-command";
+import { ConnectCommand } from "../agent-keys/connect-command";
+import { serverName } from "../agent-keys/server-name";
 
 /**
  * The setup guide, in three parts that are deliberately separated because

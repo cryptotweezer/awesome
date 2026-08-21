@@ -4,7 +4,8 @@ import { listConnections } from "@/lib/oauth/store";
 import { appBaseUrl } from "@/lib/app-url";
 import { KeysManager } from "./keys-manager";
 import { Connections } from "./connections";
-import { ConnectCommand, serverName } from "./connect-command";
+import { ConnectCommand } from "./connect-command";
+import { serverName } from "./server-name";
 import { Activity } from "./activity";
 import { listAgentCalls } from "@/lib/gateway/audit";
 

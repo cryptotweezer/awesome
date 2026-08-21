@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:scoping": "node --test tests/org-scoping.test.mjs",
+    "test:static": "node --test tests/org-scoping.test.mjs tests/client-boundary.test.mjs",
     "test:db": "node --env-file=.env.local --test tests/onboarding.test.mjs tests/assistant-quota.test.mjs tests/purge.test.mjs tests/gst.test.mjs",
     "test:http": "node --env-file=../_backups_awesome/isolation-keys.env --test tests/isolation.test.mjs tests/gateway-surface.test.mjs tests/documents.test.mjs tests/oauth.test.mjs tests/gateway-guards.test.mjs",
     "test:seed": "node --env-file=.env.local scripts/seed-test-org.mjs",
