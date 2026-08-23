@@ -36,7 +36,7 @@ const CONVERSATION: Line[] = [
 ];
 
 const MORE = [
-  "Could you pull up the last few invoices for Acme?",
+  "Could you pull up the last few invoices for Wave Tech?",
   "Can you get my tax statement ready for last financial year?",
   "Mark invoice #0035 as paid, please",
   "Who has fallen behind on payments?",

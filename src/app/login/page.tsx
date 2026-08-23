@@ -269,7 +269,7 @@ export default async function LoginPage({
           <div className="grid gap-4 sm:grid-cols-2">
             <Card
               title="Bill from a sentence"
-              body={`"Invoice that client for yesterday's job, $150." It works out the client, the rate, the day the work was done and the due date, and asks when it is not sure.`}
+              body={`"Invoice Wave Tech for yesterday's job, $150." It works out the client, the rate, the day the work was done and the due date, and asks when it is not sure.`}
             />
             <Card
               title="Answer the money questions"
