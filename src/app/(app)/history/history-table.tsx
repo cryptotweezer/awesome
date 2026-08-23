@@ -67,6 +67,21 @@ export function HistoryTable({
     [invoices],
   );
 
+  // Built from what is actually there. A business billing under one entity
+  // never sees this filter; one billing under two gets both names without
+  // anybody configuring anything, and nobody ever sees somebody else's.
+  const issuerNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          invoices
+            .map((i) => i.issuer?.short_name)
+            .filter((n): n is string => Boolean(n)),
+        ),
+      ).sort(),
+    [invoices],
+  );
+
   function matches(i: InvoiceListRow) {
     if (client !== "all" && i.bill_to_name !== client) return false;
     if (status !== "all" && i.status !== status) return false;
@@ -160,11 +175,16 @@ export function HistoryTable({
             </option>
           ))}
         </Select>
-        <Select value={abn} onChange={setAbn} label="ABN">
-          <option value="all">Both ABNs</option>
-          <option value="Mavi">Mavi</option>
-          <option value="Andres">Andres</option>
-        </Select>
+        {issuerNames.length > 1 && (
+          <Select value={abn} onChange={setAbn} label="ABN">
+            <option value="all">All ABNs</option>
+            {issuerNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </Select>
+        )}
 
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
           <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -468,30 +488,60 @@ function InvoiceTable({
 /** Note cell: truncated in-row, full text in a hover tooltip (fixed-positioned
  *  so the table's horizontal scroll never clips it). */
 function NoteCell({ note }: { note: string | null }) {
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(
-    null,
-  );
+  const [anchor, setAnchor] = useState<{
+    top: number;
+    bottom: number;
+    left: number;
+  } | null>(null);
+  const [top, setTop] = useState<number | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
+
+  // Same placement problem as the row menu below, and the same answer: a long
+  // note on one of the last rows used to open downward past the bottom of the
+  // window, where it cannot be read and cannot be scrolled to.
+  useEffect(() => {
+    if (!anchor || !tipRef.current) return;
+    const height = tipRef.current.offsetHeight;
+    const margin = 8;
+    const below = anchor.bottom + 6;
+    setTop(
+      below + height + margin <= window.innerHeight
+        ? below
+        : Math.max(margin, anchor.top - 6 - height),
+    );
+  }, [anchor]);
 
   if (!note)
     return <span className="text-slate-400 dark:text-slate-500">-</span>;
 
   function show() {
     const r = ref.current?.getBoundingClientRect();
-    if (r) setCoords({ top: r.bottom + 6, left: r.left });
+    if (r) {
+      setAnchor({ top: r.top, bottom: r.bottom, left: r.left });
+      setTop(null);
+    }
   }
 
   return (
     <span
       ref={ref}
       onMouseEnter={show}
-      onMouseLeave={() => setCoords(null)}
+      onMouseLeave={() => setAnchor(null)}
       className="block max-w-[16rem] cursor-default truncate text-slate-500 dark:text-slate-400"
     >
       {note}
-      {coords && (
+      {anchor && (
         <span
-          style={{ position: "fixed", top: coords.top, left: coords.left }}
+          ref={tipRef}
+          style={{
+            position: "fixed",
+            top: top ?? anchor.bottom + 6,
+            left: anchor.left,
+            // Hidden for the frame between being rendered and being measured,
+            // so it is never seen in the wrong place.
+            visibility: top === null ? "hidden" : "visible",
+          }}
           className="z-50 block max-w-sm whitespace-normal rounded-lg bg-slate-900 px-3 py-2 text-xs font-normal text-white dark:bg-slate-800 dark:text-slate-100 shadow-lg"
         >
           {note}
@@ -505,9 +555,14 @@ function NoteCell({ note }: { note: string | null }) {
 function RowMenu({ inv }: { inv: InvoiceListRow }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; right: number } | null>(
-    null,
-  );
+  /** Where the button was when the menu opened. */
+  const [anchor, setAnchor] = useState<{
+    top: number;
+    bottom: number;
+    right: number;
+  } | null>(null);
+  /** Where the menu ended up, once it has been measured. Null until then. */
+  const [top, setTop] = useState<number | null>(null);
   const [confirm, setConfirm] = useState<"cancel" | "delete" | null>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -521,7 +576,14 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
 
   function openMenu() {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setCoords({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    if (r) {
+      setAnchor({
+        top: r.top,
+        bottom: r.bottom,
+        right: window.innerWidth - r.right,
+      });
+      setTop(null);
+    }
     setError(null);
     setOpen(true);
   }
@@ -529,6 +591,31 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
     setOpen(false);
     setConfirm(null);
   }
+
+  /**
+   * Put the menu where it can actually be read.
+   *
+   * It is positioned `fixed` so that it escapes the scrolling table it belongs
+   * to. The cost of that is that a menu opening downward off the bottom of the
+   * window cannot be reached: a fixed element does not move with the page, and
+   * scrolling closes this one anyway. The last rows of a long list were showing
+   * their first option and hiding the rest.
+   *
+   * So: downward when there is room, upward when there is not. Measured after
+   * render rather than guessed, because the height depends on which actions
+   * this row offers and on whether a confirmation has replaced them.
+   */
+  useEffect(() => {
+    if (!open || !anchor || !menuRef.current) return;
+    const height = menuRef.current.offsetHeight;
+    const margin = 8;
+    const below = anchor.bottom + 4;
+    setTop(
+      below + height + margin <= window.innerHeight
+        ? below
+        : Math.max(margin, anchor.top - 4 - height),
+    );
+  }, [open, anchor, confirm, error]);
 
   useEffect(() => {
     if (!open) return;
@@ -540,7 +627,13 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") close();
     }
-    function onMove() {
+    // Resize always, and scrolling of anything except the menu itself: on a
+    // window too short to hold it the menu gets its own scrollbar, and using
+    // that must not dismiss it.
+    function onMove(e: Event) {
+      if (e.type === "scroll" && menuRef.current?.contains(e.target as Node)) {
+        return;
+      }
       close();
     }
     document.addEventListener("mousedown", onDown);
@@ -580,10 +673,22 @@ function RowMenu({ inv }: { inv: InvoiceListRow }) {
         ⋯
       </button>
 
-      {open && coords && (
+      {open && anchor && (
         <div
           ref={menuRef}
-          style={{ position: "fixed", top: coords.top, right: coords.right }}
+          style={{
+            position: "fixed",
+            top: top ?? anchor.bottom + 4,
+            right: anchor.right,
+            // Hidden for the one frame between being rendered and being
+            // measured, so it is never seen in the wrong place. It still has a
+            // layout box, which is what makes it measurable.
+            visibility: top === null ? "hidden" : "visible",
+            // A window too short for even the flipped menu scrolls the menu
+            // itself rather than letting it hang off an edge.
+            maxHeight: "calc(100vh - 16px)",
+            overflowY: "auto",
+          }}
           className="z-50 w-48 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-1 text-left text-sm shadow-lg"
         >
           {confirm === null ? (

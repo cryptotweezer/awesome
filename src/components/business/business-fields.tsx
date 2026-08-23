@@ -422,50 +422,6 @@ export function BusinessFields({
           </span>
         </label>
       </Card>
-
-      {/* Not on a trial. Somebody trying the app is here to see whether it
-          bills, and this asks them to decide how they price their work before
-          they have raised a single invoice. Left off, which is what a trial
-          already defaults to, the client form asks who the client is and the
-          price is set on each invoice line, which needs no explanation. A
-          business that agrees rates in advance turns it on once it is real. */}
-      {editing && !org?.is_demo && (
-        <Card
-          title="How you bill"
-          hint="Only about how much the forms fill in for you. Nothing here changes an invoice that already exists."
-        >
-          <Field label="Your usual service">
-            <input
-              name="default_service_description"
-              defaultValue={v("default_service_description", org?.default_service_description)}
-              placeholder="Leave empty if it is different every time"
-              className="input"
-            />
-          </Field>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            If you sell the same thing over and over, put it here and every new
-            invoice line starts with it. If not, leave it empty and say what the
-            work was on each line.
-          </p>
-
-          <label className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-300">
-            <input
-              type="checkbox"
-              name="per_client_defaults"
-              defaultChecked={ticked("per_client_defaults", org?.per_client_defaults ?? false)}
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600"
-            />
-            <span>
-              Agree a service and a rate with each client
-              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                For work priced in advance and repeated. With this off, the
-                client form only asks who they are, and the price is set on each
-                invoice line.
-              </span>
-            </span>
-          </label>
-        </Card>
-      )}
     </>
   );
 }

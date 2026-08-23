@@ -44,7 +44,7 @@ const STEPS: Step[] = [
   {
     target: "nav-clients",
     title: "Who you bill",
-    body: "A name and an address is enough to invoice somebody. If you agree a price with each client instead, you can turn that on in Business details.",
+    body: "A name and an address is enough to invoice somebody. Add them once and they are there every time you bill.",
   },
   {
     target: "nav-history",
