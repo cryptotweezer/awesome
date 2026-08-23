@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { revokeByToken } from "@/lib/oauth/credentials";
+import { protectAuth } from "@/lib/security/arcjet";
 
 /**
  * Token revocation (RFC 7009). An assistant being disconnected on the user's
@@ -11,6 +12,13 @@ import { revokeByToken } from "@/lib/oauth/credentials";
  * whether a token exists.
  */
 export async function POST(request: NextRequest) {
+  // Revoking is the safe direction, but it is still an unauthenticated door
+  // that touches the database on every call. Inert with no ARCJET_KEY.
+  const guard = await protectAuth(request);
+  if (!guard.ok) {
+    return new Response(null, { status: 429 });
+  }
+
   const token = await readToken(request);
   if (token) await revokeByToken(token);
   return new Response(null, {

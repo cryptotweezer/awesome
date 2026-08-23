@@ -207,3 +207,29 @@ describe("the trial limits are real", () => {
     assert.equal(data.max_agent_keys, null);
   });
 });
+
+/**
+ * Nothing in this schema is callable by anon or authenticated.
+ *
+ * Row level security is on with no policies, so the SECURITY DEFINER functions
+ * are the only way into the data, and they bypass RLS by definition. What keeps
+ * them out of reach is two separate things: `anon` and `authenticated` have no
+ * USAGE on the schema, and each function has EXECUTE revoked.
+ *
+ * The second one drifts. The lockdown loop runs once at the end of schema.sql,
+ * and CREATE FUNCTION resets privileges to the default of EXECUTE TO PUBLIC, so
+ * a migration that recreates a function with a different argument list undoes it
+ * silently. That is exactly what happened to create_invoice, and only a review
+ * caught it. This is that review, written down.
+ */
+describe("no function is callable by anon or authenticated", () => {
+  test("the lockdown still covers every function", async () => {
+    const { data, error } = await db.rpc("open_functions");
+    assert.equal(error, null, error?.message);
+    assert.deepEqual(
+      data,
+      [],
+      `these functions lost their lock: ${JSON.stringify(data)}`,
+    );
+  });
+});

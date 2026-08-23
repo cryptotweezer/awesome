@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { safeEqual } from "@/lib/gateway/keys";
 import { todayInSydney } from "@/lib/format";
 
 /**
@@ -45,8 +46,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const auth = request.headers.get("authorization");
-  if (auth !== `Bearer ${secret}`) {
+  // Compared in constant time, like every other secret here. The exposure is
+  // small, but a header compared with === is a habit worth not having.
+  const auth = request.headers.get("authorization") ?? "";
+  if (!safeEqual(auth, `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Not authorised." }, { status: 401 });
   }
 
@@ -96,12 +99,22 @@ export async function GET(request: Request) {
     | { purged_calls: number; purged_writes: number }
     | undefined;
 
+  // Both of these existed and neither was ever called, so redeemed codes and
+  // half-finished client registrations simply accumulated. Best effort: a
+  // failure here is reported, never fatal, because it is housekeeping.
+  const { data: codes } = await supabase.rpc("purge_expired_oauth_codes");
+  const { data: clients } = await supabase.rpc("purge_unused_oauth_clients", {
+    p_days: 30,
+  });
+
   return NextResponse.json({
     swept: sweeping,
     purged: purged.length,
     ...(days === null ? {} : { days }),
     agent_calls_removed: trimmed?.purged_calls ?? 0,
     agent_writes_removed: trimmed?.purged_writes ?? 0,
+    oauth_codes_removed: codes ?? 0,
+    oauth_clients_removed: clients ?? 0,
     ...(historyError ? { agent_history_error: historyError.message } : {}),
   });
 }

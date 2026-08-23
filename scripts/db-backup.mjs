@@ -45,7 +45,11 @@ for (const table of TABLES) {
     process.exit(1);
   }
   snapshot.tables[table] =
-    table === "agent_keys" ? data.map(({ key_hash, ...rest }) => rest) : data;
+    table === "agent_keys"
+      ? // Destructured only to drop it: a backup must never carry key material.
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        data.map(({ key_hash, ...rest }) => rest)
+      : data;
   console.log(`${table}: ${data.length}`);
 }
 

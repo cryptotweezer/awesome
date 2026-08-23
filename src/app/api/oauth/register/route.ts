@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { registerClient } from "@/lib/oauth/store";
+import { protectAuth } from "@/lib/security/arcjet";
 
 /**
  * Dynamic client registration (RFC 7591).
@@ -14,6 +15,14 @@ import { registerClient } from "@/lib/oauth/store";
  * somebody's machine receives its callback.
  */
 export async function POST(request: NextRequest) {
+  // Anybody may register, but not any number of times. This endpoint writes a
+  // row on every call and needs no credential to reach, which is exactly the
+  // shape of thing that fills a table overnight. Inert with no ARCJET_KEY.
+  const guard = await protectAuth(request);
+  if (!guard.ok) {
+    return err("temporarily_unavailable", guard.reason);
+  }
+
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;

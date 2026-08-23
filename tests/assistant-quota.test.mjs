@@ -30,6 +30,12 @@ const db = createClient(url, key, {
 const AWESOME_ORG_ID = "00000000-0000-0000-0000-000000000001";
 const userId = randomUUID();
 let orgId = null;
+/**
+ * The allowance the database gave this business. Read rather than written down,
+ * so changing the default is a one-line change in the schema and not a hunt
+ * through this file for every number that happened to equal it.
+ */
+let cap = null;
 
 after(async () => {
   if (orgId) {
@@ -53,7 +59,8 @@ describe("a trial account gets a fixed allowance", () => {
     });
     assert.equal(error, null, error?.message);
     orgId = data.id;
-    assert.equal(data.max_ai_messages, 10);
+    cap = data.max_ai_messages;
+    assert.ok(cap > 0, "a new business must get an allowance");
     assert.equal(data.ai_messages_used, 0);
   });
 
@@ -63,7 +70,7 @@ describe("a trial account gets a fixed allowance", () => {
         p_org_id: orgId,
       });
       assert.equal(error, null, error?.message);
-      assert.equal(data, 20 - spent, `after ${spent} messages`);
+      assert.equal(data, cap - spent, `after ${spent} messages`);
     }
   });
 
@@ -77,7 +84,7 @@ describe("a trial account gets a fixed allowance", () => {
   });
 
   test("the allowance runs out and stays out", async () => {
-    await db.from("orgs").update({ ai_messages_used: 20 }).eq("id", orgId);
+    await db.from("orgs").update({ ai_messages_used: cap }).eq("id", orgId);
 
     const first = await db.rpc("consume_ai_message", { p_org_id: orgId });
     assert.ok(first.error, "a 21st message was allowed");
@@ -89,11 +96,11 @@ describe("a trial account gets a fixed allowance", () => {
       .select("ai_messages_used")
       .eq("id", orgId)
       .single();
-    assert.equal(data.ai_messages_used, 20);
+    assert.equal(data.ai_messages_used, cap);
   });
 
   test("concurrent requests cannot both spend the last message", async () => {
-    await db.from("orgs").update({ ai_messages_used: 19 }).eq("id", orgId);
+    await db.from("orgs").update({ ai_messages_used: cap - 1 }).eq("id", orgId);
 
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
@@ -108,7 +115,7 @@ describe("a trial account gets a fixed allowance", () => {
       .select("ai_messages_used")
       .eq("id", orgId)
       .single();
-    assert.equal(data.ai_messages_used, 20, "the counter overran its cap");
+    assert.equal(data.ai_messages_used, cap, "the counter overran its cap");
   });
 });
 

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { getClient, issueTokens } from "@/lib/oauth/store";
 import { redeemCode, refreshTokens } from "@/lib/oauth/credentials";
 import { hashKey, safeEqual } from "@/lib/gateway/keys";
+import { protectAuth } from "@/lib/security/arcjet";
 
 /**
  * The token endpoint. Two grants, both of which end with a fresh pair of
@@ -15,6 +16,14 @@ import { hashKey, safeEqual } from "@/lib/gateway/keys";
  * sends, and JSON as well because a few send that instead.
  */
 export async function POST(request: NextRequest) {
+  // The credential endpoint. Codes and refresh tokens are 32 random bytes, so
+  // guessing one is not the threat; being hammered is. Inert with no
+  // ARCJET_KEY.
+  const guard = await protectAuth(request);
+  if (!guard.ok) {
+    return err("temporarily_unavailable", guard.reason);
+  }
+
   const body = await readBody(request);
   const grant = str(body.grant_type);
   const clientId = str(body.client_id);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export function LoginButton({
@@ -16,6 +17,7 @@ export function LoginButton({
   next?: string;
 }) {
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   async function signInWithGoogle() {
     setLoading(true);
@@ -31,7 +33,9 @@ export function LoginButton({
     });
     if (error) {
       setLoading(false);
-      window.location.href = "/login?error=auth";
+      // Replace rather than push: a failed sign-in should not become a step
+      // the back button walks into again.
+      router.replace("/login?error=auth");
     }
   }
 

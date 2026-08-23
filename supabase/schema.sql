@@ -639,6 +639,28 @@ create trigger trg_agent_keys_quota
   before insert on awesome.agent_keys
   for each row execute function awesome.enforce_quota('agent_keys');
 
+-- Registration is open by design, so the table it writes to needs the same
+-- expiry every other append-only table here has. A client with no token and no
+-- use in 30 days never completed a connection.
+create or replace function awesome.purge_unused_oauth_clients(
+  p_days integer default 30
+)
+returns integer
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+declare removed integer;
+begin
+  delete from awesome.oauth_clients c
+   where c.created_at < now() - make_interval(days => greatest(coalesce(p_days, 30), 1))
+     and not exists (
+       select 1 from awesome.oauth_tokens t where t.client_id = c.client_id
+     );
+  get diagnostics removed = row_count;
+  return removed;
+end $function$;
+
 -- ---------------------------------------------------------------------
 --  Time. Never CURRENT_DATE: that is the server's UTC day, which shifts the
 --  financial year and the overdue flags for anybody not living in UTC.
@@ -1534,10 +1556,40 @@ begin
          'recalc_invoice_totals', 'touch_updated_at', 'enforce_quota'
        )
   loop
-    execute format('revoke all on function %s from public', fn.sig);
+    execute format('revoke all on function %s from public, anon, authenticated', fn.sig);
     execute format('grant execute on function %s to service_role', fn.sig);
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------
+--  Any function anon or authenticated can still execute, which should always
+--  be nothing but the trigger functions above.
+--
+--  The loop runs once, and CREATE FUNCTION resets privileges to the default of
+--  EXECUTE TO PUBLIC, so a migration that later recreates a function with a
+--  different argument list silently undoes the lock. That happened once, to
+--  create_invoice, and went unnoticed until a review. A test calls this now.
+-- ---------------------------------------------------------------------
+create or replace function awesome.open_functions()
+returns table(function_name text, reason text)
+language sql stable
+set search_path to 'awesome', 'pg_catalog'
+as $$
+  select p.oid::regprocedure::text,
+         'executable by anon or authenticated'
+    from pg_proc p
+   where p.pronamespace = 'awesome'::regnamespace
+     and p.prokind = 'f'
+     and p.proname not in (
+       'invoice_before_write', 'item_before_write',
+       'recalc_invoice_totals', 'touch_updated_at', 'enforce_quota'
+     )
+     and (has_function_privilege('anon', p.oid, 'EXECUTE')
+          or has_function_privilege('authenticated', p.oid, 'EXECUTE'));
+$$;
+
+revoke all on function awesome.open_functions() from public, anon, authenticated;
+grant execute on function awesome.open_functions() to service_role;
 
 -- ---------------------------------------------------------------------
 --  Storage: the logo each business prints on its documents.
