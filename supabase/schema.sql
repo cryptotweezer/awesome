@@ -88,7 +88,7 @@ Thanks,
   max_invoices     integer default 20,
   max_clients      integer default 10,
   max_agent_keys   integer default 3,
-  max_ai_messages  integer default 20,
+  max_ai_messages  integer default 10,
   ai_messages_used integer not null default 0,
 
   onboarding jsonb not null default '{}'::jsonb,   -- setup checklist progress

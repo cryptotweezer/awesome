@@ -53,7 +53,7 @@ describe("a trial account gets a fixed allowance", () => {
     });
     assert.equal(error, null, error?.message);
     orgId = data.id;
-    assert.equal(data.max_ai_messages, 20);
+    assert.equal(data.max_ai_messages, 10);
     assert.equal(data.ai_messages_used, 0);
   });
 

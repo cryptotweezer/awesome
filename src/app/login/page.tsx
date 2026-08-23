@@ -32,13 +32,14 @@ const MESSAGES: Record<string, string> = {
 
 /**
  * The public copy of this system, for somebody who would rather run it on their
- * own hosting and their own database. Null until that repository exists: the
- * one being prepared carries none of Awesome, no demo account and no trial.
+ * own hosting and their own database. It carries none of Awesome, no demo
+ * account and no trial: the schema is named for what it does, anybody who signs
+ * in owns their business outright, and nothing is ever purged.
  *
- * To publish it, set this to the URL. Nothing else on the page needs touching:
- * the section below turns into a link on its own.
+ * Set back to null and the section below returns to saying the repository is on
+ * its way. Nothing else on the page needs touching either way.
  */
-const REPO_URL: string | null = null;
+const REPO_URL: string | null = "https://github.com/cryptotweezer/AI_billing_service";
 
 const NAV = [
   { id: "connect", label: "Connect your AI" },
@@ -399,52 +400,78 @@ export default async function LoginPage({
       </main>
 
       <footer className="border-t border-slate-200 py-10 dark:border-slate-800">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 text-sm text-slate-400">
-          <span>
-            &copy; {new Date().getFullYear()} AI Billing System. All rights
-            reserved.
-          </span>
-          <div className="flex items-center gap-1">
-            <a
-              href="https://cv.andreshenao.com.au/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2.5 rounded-lg px-2 py-1 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
-            >
-              <span>Built by Andres Henao</span>
-              {/* Two files, one hidden per theme. Swapping in JS would flash. */}
-              <Image
-                src="/logo_ah_black.png"
-                alt=""
-                width={26}
-                height={26}
-                className="dark:hidden"
-              />
-              <Image
-                src="/logo_ah_white.png"
-                alt=""
-                width={26}
-                height={26}
-                className="hidden dark:block"
-              />
-            </a>
-            <a
-              href="https://www.linkedin.com/in/andreshenao/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Andres Henao on LinkedIn"
-              className="rounded-lg p-2 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
-            >
-              <svg
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
+        <div className="mx-auto flex max-w-5xl flex-wrap items-end justify-between gap-4 px-6 text-sm text-slate-400">
+          <div>
+            <span className="block">
+              &copy; {new Date().getFullYear()} AI Billing System. All rights
+              reserved.
+            </span>
+            {/* The two places to find the person who built it, under the line
+                that says somebody did. Icons only: the byline opposite already
+                carries the name. */}
+            <div className="mt-2 -ml-2 flex items-center gap-1">
+              <a
+                href="https://www.linkedin.com/in/andreshenao/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Andres Henao on LinkedIn"
+                className="rounded-lg p-2 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
               >
-                <path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM3 9h4v12H3V9Zm7 0h3.8v1.64h.05c.53-.95 1.83-1.95 3.76-1.95 4.02 0 4.76 2.5 4.76 5.76V21h-4v-5.8c0-1.38-.03-3.16-2-3.16-2 0-2.31 1.5-2.31 3.06V21h-4V9Z" />
-              </svg>
-            </a>
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM3 9h4v12H3V9Zm7 0h3.8v1.64h.05c.53-.95 1.83-1.95 3.76-1.95 4.02 0 4.76 2.5 4.76 5.76V21h-4v-5.8c0-1.38-.03-3.16-2-3.16-2 0-2.31 1.5-2.31 3.06V21h-4V9Z" />
+                </svg>
+              </a>
+              <a
+                href="https://cv.andreshenao.com.au/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Andres Henao's website"
+                className="rounded-lg p-2 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+              >
+                <svg
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M3 12h18" />
+                  <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18Z" />
+                </svg>
+              </a>
+            </div>
           </div>
+
+          <a
+            href="https://cv.andreshenao.com.au/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+          >
+            <span>Built by Andres Henao</span>
+            {/* Two files, one hidden per theme. Swapping in JS would flash. */}
+            <Image
+              src="/logo_ah_black.png"
+              alt=""
+              width={26}
+              height={26}
+              className="dark:hidden"
+            />
+            <Image
+              src="/logo_ah_white.png"
+              alt=""
+              width={26}
+              height={26}
+              className="hidden dark:block"
+            />
+          </a>
         </div>
       </footer>
     </div>

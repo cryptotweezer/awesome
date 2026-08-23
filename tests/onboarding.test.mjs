@@ -73,7 +73,7 @@ describe("creating a business", () => {
     assert.equal(data.max_invoices, 20);
     assert.equal(data.max_clients, 10);
     assert.equal(data.max_agent_keys, 3);
-    assert.equal(data.max_ai_messages, 20);
+    assert.equal(data.max_ai_messages, 10);
     assert.equal(data.ai_messages_used, 0);
     assert.notEqual(data.id, AWESOME_ORG_ID);
   });
