@@ -82,7 +82,7 @@ export function ScrollProgress() {
   return (
     <div
       aria-hidden="true"
-      className="fixed inset-x-0 top-0 z-30 h-0.5 origin-left bg-slate-900 dark:bg-slate-100"
+      className="bg-accent fixed inset-x-0 top-0 z-30 h-0.5 origin-left"
       style={{ transform: `scaleX(${pct})` }}
     />
   );
@@ -93,7 +93,7 @@ export function CopyLine({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
-      <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 pr-20 text-xs leading-relaxed text-slate-100 ring-1 ring-slate-800">
+      <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 pr-20 font-mono text-xs leading-relaxed text-slate-100 ring-1 ring-white/10">
         {text}
       </pre>
       <button
@@ -103,7 +103,7 @@ export function CopyLine({ text }: { text: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
-        className="absolute right-3 top-3 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 opacity-80 transition hover:bg-slate-700 hover:opacity-100"
+        className="absolute top-3 right-3 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-200 ring-1 ring-white/10 transition hover:bg-slate-700 hover:text-white"
       >
         {copied ? "Copied" : "Copy"}
       </button>
@@ -152,8 +152,8 @@ export function SectionLinks({
           href={`#${item.id}`}
           className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
             active === item.id
-              ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100"
-              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+              ? "bg-accent-soft text-accent"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-100"
           }`}
         >
           {item.label}

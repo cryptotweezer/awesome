@@ -34,8 +34,9 @@ import { todayInSydney } from "@/lib/format";
  * is not covered by database cascades.
  *
  * Overrides, for running it by hand: `?days=30` purges trials older than that
- * many days instead of sweeping, and `?sweep=1` sweeps on a day that is not
- * the 1st.
+ * many days instead of sweeping, `?sweep=1` sweeps on a day that is not the
+ * 1st, and `?keep=100` trims the agent log harder than the usual 500 rows per
+ * business.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -91,12 +92,24 @@ export async function GET(request: Request) {
   // so without an expiry they become the biggest tables in the database and
   // nobody notices until it matters. This is not gated on the purge succeeding,
   // and a failure here is reported, not fatal.
+  //
+  // Trials and the deployment owner alike: nothing here is aimed at is_demo.
+  // The log is trimmed by age AND by count, because age alone leaves a business
+  // running an agent on a schedule with ninety days of every wake-up. `keep` is
+  // per business and counts only the calls that succeeded, so a burst of
+  // ordinary work can never push out the denials.
+  const askedKeep = Number(params.get("keep"));
+  const keep =
+    params.has("keep") && Number.isFinite(askedKeep) && askedKeep > 0
+      ? Math.floor(askedKeep)
+      : 500;
+
   const { data: history, error: historyError } = await supabase.rpc(
     "purge_agent_history",
-    { p_call_days: 90, p_write_days: 1 },
+    { p_call_days: 90, p_write_days: 1, p_call_keep: keep },
   );
   const trimmed = (history ?? [])[0] as
-    | { purged_calls: number; purged_writes: number }
+    | { purged_calls: number; purged_writes: number; capped_calls: number }
     | undefined;
 
   // Both of these existed and neither was ever called, so redeemed codes and
@@ -112,6 +125,8 @@ export async function GET(request: Request) {
     purged: purged.length,
     ...(days === null ? {} : { days }),
     agent_calls_removed: trimmed?.purged_calls ?? 0,
+    agent_calls_capped: trimmed?.capped_calls ?? 0,
+    agent_calls_kept_per_org: keep,
     agent_writes_removed: trimmed?.purged_writes ?? 0,
     oauth_codes_removed: codes ?? 0,
     oauth_clients_removed: clients ?? 0,

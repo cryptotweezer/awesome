@@ -8,16 +8,29 @@
 :root {
   --background: #ffffff;
   --foreground: #0f172a;
+
+  /* One accent, used for the things you are meant to click and nothing else.
+     Kept here so the landing, the dashboard and the buttons cannot drift. */
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --hairline: rgb(15 23 42 / 0.08);
 }
 
 .dark {
   --background: #020617;
   --foreground: #f1f5f9;
+
+  --accent: #818cf8;
+  --accent-soft: rgb(99 102 241 / 0.12);
+  --hairline: rgb(148 163 184 / 0.14);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-hairline: var(--hairline);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -25,7 +38,10 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* The layout loads Geist and hands it over as --font-sans. Naming a system
+     stack here instead would quietly throw that away on every page. */
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 @layer components {
@@ -63,12 +79,53 @@ body {
   }
   .lift:hover {
     transform: translateY(-3px);
-    box-shadow: 0 12px 28px -18px rgb(15 23 42 / 0.45);
+    box-shadow: 0 18px 40px -24px rgb(15 23 42 / 0.5);
   }
   @media (prefers-reduced-motion: reduce) {
     .lift:hover {
       transform: none;
     }
+  }
+
+  /* The surface every card, panel and step sits on: a hairline that reads as
+     a real edge in both themes, over a background a shade off the page. */
+  .surface {
+    border: 1px solid var(--hairline);
+    background: rgb(255 255 255 / 0.7);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  }
+  .dark .surface {
+    background: rgb(15 23 42 / 0.5);
+    box-shadow: none;
+  }
+
+  /* Ruled paper behind the hero, faded out at the edges so it never ends on a
+     hard line. Decoration only, and cheap: two gradients, no image. */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, var(--hairline) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--hairline) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      #000 20%,
+      transparent 75%
+    );
+    mask-image: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      #000 20%,
+      transparent 75%
+    );
+  }
+
+  /* The one piece of colour on the page, sitting behind the headline. */
+  .aurora {
+    background: radial-gradient(
+      45% 45% at 50% 40%,
+      color-mix(in oklab, var(--accent) 28%, transparent) 0%,
+      transparent 100%
+    );
+    filter: blur(64px);
   }
 
   .input {

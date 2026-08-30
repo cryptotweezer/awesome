@@ -390,6 +390,7 @@ create index if not exists invoices_org_date_idx    on awesome.invoices (org_id,
 create index if not exists invoices_org_paid_at_idx on awesome.invoices (org_id, paid_at) where status = 'paid';
 create index if not exists agent_calls_org_idx      on awesome.agent_calls (org_id, at desc);
 create index if not exists agent_calls_cred_idx     on awesome.agent_calls (credential_id, at desc);
+create index if not exists agent_calls_age_idx     on awesome.agent_calls (at);
 create index if not exists agent_writes_age_idx     on awesome.agent_writes (created_at);
 
 -- ---------------------------------------------------------------------
@@ -426,12 +427,32 @@ end $$;
 
 -- A log with no expiry becomes the biggest table in the database and
 -- nobody notices until it matters. Called daily by the same cron that
--- purges dormant trials.
+-- purges dormant trials, and aimed at every business, trial or not.
+--
+-- Two rules, and a row leaves when either one says so: older than
+-- p_call_days, or beyond the newest p_call_keep of its own business. Age
+-- alone is the wrong shape here. A business that asks its assistant three
+-- things a week is nowhere near ninety days of anything, while one running
+-- an agent on a schedule writes a row every time that agent wakes up.
+--
+-- The cap counts only the calls that succeeded. Denials and errors are the
+-- rows worth having, as the table's own comment says, and they are rare
+-- enough that they can never be what fills it. They still leave on age.
+--
+-- 500 is far above what is ever shown: the Agents page reads the newest 25.
+-- The cap is not a display limit, it is the point past which nobody scrolls
+-- and the rows are only costing space.
 create or replace function awesome.purge_agent_history(
   p_call_days  integer default 90,
-  p_write_days integer default 1
+  p_write_days integer default 1,
+  p_call_keep  integer default 500,
+  -- Null means every business, which is what the cron passes. Naming one
+  -- confines all three deletes to it, so a test can prove the rules against
+  -- rows it created itself instead of against somebody's real history. The
+  -- trial purge carries the same argument, for the same reason.
+  p_org_id     uuid    default null
 )
-returns table (purged_calls integer, purged_writes integer)
+returns table (purged_calls integer, purged_writes integer, capped_calls integer)
 language plpgsql
 security definer
 set search_path = ''
@@ -439,16 +460,38 @@ as $$
 declare
   v_calls  integer;
   v_writes integer;
+  v_capped integer;
 begin
   delete from awesome.agent_calls
-   where at < now() - make_interval(days => greatest(p_call_days, 1));
+   where at < now() - make_interval(days => greatest(p_call_days, 1))
+     and (p_org_id is null or org_id = p_org_id);
   get diagnostics v_calls = row_count;
 
+  -- Numbered newest first within each business, so the cap is per business
+  -- and a busy one can never crowd out a quiet one's history. `id` breaks
+  -- the tie on rows written in the same instant, which keeps the ranking
+  -- stable between runs instead of dropping a different row each night.
+  with ranked as (
+    select id,
+           row_number() over (
+             partition by org_id order by at desc, id desc
+           ) as rn
+      from awesome.agent_calls
+     where outcome = 'ok'
+       and (p_org_id is null or org_id = p_org_id)
+  )
+  delete from awesome.agent_calls c
+   using ranked r
+   where c.id = r.id
+     and r.rn > greatest(p_call_keep, 1);
+  get diagnostics v_capped = row_count;
+
   delete from awesome.agent_writes
-   where created_at < now() - make_interval(days => greatest(p_write_days, 1));
+   where created_at < now() - make_interval(days => greatest(p_write_days, 1))
+     and (p_org_id is null or org_id = p_org_id);
   get diagnostics v_writes = row_count;
 
-  return query select v_calls, v_writes;
+  return query select v_calls, v_writes, v_capped;
 end $$;
 
 grant usage on schema awesome to service_role;

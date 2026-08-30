@@ -43,10 +43,10 @@ export function LoginButton({
     <button
       onClick={signInWithGoogle}
       disabled={loading}
-      className={`flex items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 ${
+      className={`flex items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15 ${
         compact
           ? "shrink-0 gap-2 px-3.5 py-2 text-sm"
-          : "w-full px-4 py-3 text-sm"
+          : "w-full px-5 py-3.5 text-[15px]"
       }`}
     >
       <svg

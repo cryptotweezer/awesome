@@ -370,3 +370,116 @@ describe("no table can quietly keep the rows of a deleted business", () => {
     await assertNothingLeft(orgId, "swept");
   });
 });
+
+/**
+ * Trimming the agent log, which is the only purge that touches the deployment
+ * owner's own rows. Every call here names its business, for the reason at the
+ * top of this file: the function's org argument is null by default and null
+ * means the whole database.
+ */
+describe("the agent log keeps the recent calls and drops the rest", () => {
+  /** Aim the trim at ONE business, never the whole database. */
+  function trim(orgId, { days = 36500, keep = 500 } = {}) {
+    return db.rpc("purge_agent_history", {
+      p_call_days: days,
+      p_write_days: 36500,
+      p_call_keep: keep,
+      p_org_id: orgId,
+    });
+  }
+
+  /** `n` successful calls for one business, oldest first, a minute apart. */
+  async function logCalls(orgId, n, outcome = "ok") {
+    const base = Date.parse("2026-01-01T00:00:00Z");
+    const rows = Array.from({ length: n }, (_, i) => ({
+      org_id: orgId,
+      at: new Date(base + i * 60_000).toISOString(),
+      credential_label: "Cap Test",
+      via: "key",
+      tool: `call_${String(i).padStart(3, "0")}`,
+      outcome,
+    }));
+    const { error } = await db.from("agent_calls").insert(rows);
+    assert.equal(error, null, error?.message);
+  }
+
+  async function toolsLeft(orgId) {
+    const { data, error } = await db
+      .from("agent_calls")
+      .select("tool, outcome")
+      .eq("org_id", orgId)
+      .order("at", { ascending: false });
+    assert.equal(error, null, error?.message);
+    return data ?? [];
+  }
+
+  test("only the newest survive the cap, and the rest go", async () => {
+    const orgId = await makeFreshOrg("Purge Test Cap Newest");
+    await logCalls(orgId, 12);
+
+    const { data, error } = await trim(orgId, { keep: 5 });
+    assert.equal(error, null, error?.message);
+    assert.equal(data[0].capped_calls, 7);
+    assert.equal(data[0].purged_calls, 0, "nothing here is old enough to expire");
+
+    const left = await toolsLeft(orgId);
+    assert.deepEqual(
+      left.map((r) => r.tool),
+      ["call_011", "call_010", "call_009", "call_008", "call_007"],
+      "the cap must keep the newest calls, not an arbitrary five",
+    );
+  });
+
+  test("a second run has nothing left to do", async () => {
+    const orgId = await makeFreshOrg("Purge Test Cap Stable");
+    await logCalls(orgId, 8);
+
+    await trim(orgId, { keep: 3 });
+    const { data } = await trim(orgId, { keep: 3 });
+    assert.equal(data[0].capped_calls, 0, "the cap must settle, not churn");
+    assert.equal((await toolsLeft(orgId)).length, 3);
+  });
+
+  test("denials and errors are not counted out by ordinary work", async () => {
+    const orgId = await makeFreshOrg("Purge Test Cap Denials");
+    await logCalls(orgId, 2, "denied");
+    await logCalls(orgId, 10);
+
+    await trim(orgId, { keep: 2 });
+
+    const left = await toolsLeft(orgId);
+    assert.equal(
+      left.filter((r) => r.outcome === "denied").length,
+      2,
+      "a burst of successful calls must not push out the refusals",
+    );
+    assert.equal(left.filter((r) => r.outcome === "ok").length, 2);
+  });
+
+  test("age still expires a row the cap would have kept", async () => {
+    const orgId = await makeFreshOrg("Purge Test Cap Age");
+    await logCalls(orgId, 3);
+
+    // 2026-01-01 is well past any sane window, and the cap is far above 3.
+    const { data, error } = await trim(orgId, { days: 30, keep: 500 });
+    assert.equal(error, null, error?.message);
+    assert.equal(data[0].purged_calls, 3);
+    assert.equal((await toolsLeft(orgId)).length, 0);
+  });
+
+  test("naming one business leaves every other one alone", async () => {
+    const mine = await makeFreshOrg("Purge Test Cap Mine");
+    const theirs = await makeFreshOrg("Purge Test Cap Theirs");
+    await logCalls(mine, 6);
+    await logCalls(theirs, 6);
+
+    await trim(mine, { keep: 1 });
+
+    assert.equal((await toolsLeft(mine)).length, 1);
+    assert.equal(
+      (await toolsLeft(theirs)).length,
+      6,
+      "the trim reached a business it was not aimed at",
+    );
+  });
+});

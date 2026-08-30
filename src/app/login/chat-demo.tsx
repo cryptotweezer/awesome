@@ -47,33 +47,33 @@ const MORE = [
 export function ChatDemo() {
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-      <div className="overflow-hidden rounded-2xl ring-1 ring-slate-200 dark:ring-slate-800">
-        <div className="flex items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-900">
+      <div className="surface overflow-hidden rounded-2xl">
+        <div className="flex items-center gap-2.5 border-b border-hairline px-4 py-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold text-white dark:bg-white dark:text-slate-900">
             H
           </span>
           <div className="leading-tight">
             <p className="text-sm font-semibold">Hermes</p>
-            <p className="text-xs text-slate-400">online</p>
+            <p className="flex items-center gap-1.5 text-xs text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />online</p>
           </div>
         </div>
 
-        <div className="space-y-3 bg-white p-4 dark:bg-slate-950 sm:p-6">
+        <div className="space-y-3 p-4 sm:p-6">
           {CONVERSATION.map((line, i) =>
             line.from === "you" ? (
               <div key={i} className="flex justify-end">
-                <p className="max-w-[80%] rounded-2xl rounded-br-sm bg-slate-900 px-4 py-2.5 text-sm text-white dark:bg-slate-100 dark:text-slate-900">
+                <p className="max-w-[80%] rounded-2xl rounded-br-sm bg-slate-900 px-4 py-2.5 text-sm text-white dark:bg-white dark:text-slate-900">
                   {line.text}
                 </p>
               </div>
             ) : (
               <div key={i} className="flex justify-start">
-                <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2.5 dark:bg-slate-900">
+                <div className="max-w-[80%] rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2.5 dark:bg-white/10">
                   <p className="text-sm text-slate-700 dark:text-slate-300">
                     {line.text}
                   </p>
                   {line.file && (
-                    <span className="mt-2.5 flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-800">
+                    <span className="mt-2.5 flex items-center gap-2 rounded-lg border border-hairline bg-white px-3 py-2 text-xs font-medium text-slate-600 dark:bg-slate-950 dark:text-slate-300">
                       <svg
                         className="h-4 w-4 shrink-0"
                         viewBox="0 0 24 24"
@@ -103,7 +103,7 @@ export function ChatDemo() {
           {MORE.map((q) => (
             <li
               key={q}
-              className="rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-400"
+              className="rounded-xl border border-hairline px-4 py-2.5 text-sm text-slate-600 dark:text-slate-400"
             >
               {q}
             </li>
