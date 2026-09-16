@@ -86,13 +86,9 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  // `/opengraph-image` is the link-preview card. The only caller that ever
-  // asks for it is a scraper with no session, so leaving it behind the gate
-  // means every pasted link previews the sign-in page instead.
-  const isPublic =
-    path.startsWith("/login") ||
-    path.startsWith("/auth") ||
-    path === "/opengraph-image";
+  // The link-preview card is a static PNG, which the proxy matcher already
+  // skips, so it needs no exception here.
+  const isPublic = path.startsWith("/login") || path.startsWith("/auth");
 
   // Signed in, not on the staff list, and guest signup is closed → force sign
   // out. Flipping GUEST_SIGNUP to "true" is what opens the door to strangers,

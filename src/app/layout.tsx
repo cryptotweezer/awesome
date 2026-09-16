@@ -27,9 +27,9 @@ const BASE_URL =
  * public pitch, not an internal note: this text is read by strangers, so it
  * names no client and no business.
  *
- * The card itself comes from `opengraph-image.tsx`, which the file convention
- * wires into `og:image` on its own. Declaring images here as well would only
- * give the two a way to disagree.
+ * The card is `public/og-cover.png`, a 1200x630 shot of the landing hero.
+ * Replacing it means writing a new filename here too: every scraper caches the
+ * image by URL, so reusing the name leaves the old card in circulation.
  */
 const DESCRIPTION =
   "Tell an AI to bill the job and it is billed. Invoices, reminders, client statements and your whole financial year, from a sentence. Bring the AI you already use, or use the one built in.";
@@ -46,11 +46,21 @@ export const metadata: Metadata = {
     siteName: "AI Billing Service",
     title: "Invoicing an AI can actually run.",
     description: DESCRIPTION,
+    images: [
+      {
+        url: "/og-cover.png",
+        width: 1200,
+        height: 630,
+        alt: "AI Billing Service landing page",
+        type: "image/png",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Invoicing an AI can actually run.",
     description: DESCRIPTION,
+    images: ["/og-cover.png"],
   },
 };
 
