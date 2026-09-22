@@ -104,6 +104,20 @@ async function assertNothingLeft(orgId, what) {
 }
 
 let awesomeBefore = null;
+// How many invoices the deployment owner had before any of this ran. Compared
+// against, rather than asserted to be more than zero: the count is whatever
+// the business happens to have, and after clearing test data it is legitimately
+// zero. What must never change is that a purge does not touch it.
+let awesomeInvoicesBefore = 0;
+
+async function awesomeInvoiceCount() {
+  const { count, error } = await db
+    .from("invoices")
+    .select("*", { count: "exact", head: true })
+    .eq("org_id", AWESOME_ORG_ID);
+  assert.equal(error, null, error?.message);
+  return count ?? 0;
+}
 
 before(async () => {
   const { data } = await db
@@ -112,6 +126,7 @@ before(async () => {
     .eq("id", AWESOME_ORG_ID)
     .single();
   awesomeBefore = data;
+  awesomeInvoicesBefore = await awesomeInvoiceCount();
   assert.equal(
     data.is_demo,
     false,
@@ -152,11 +167,11 @@ describe("the deployment owner is never purged", () => {
   });
 
   test("its invoices are still there", async () => {
-    const { count } = await db
-      .from("invoices")
-      .select("*", { count: "exact", head: true })
-      .eq("org_id", AWESOME_ORG_ID);
-    assert.ok((count ?? 0) > 0, "the deployment owner lost its invoices");
+    assert.equal(
+      await awesomeInvoiceCount(),
+      awesomeInvoicesBefore,
+      "the deployment owner lost invoices",
+    );
   });
 });
 
@@ -213,11 +228,11 @@ describe("closing your own account", () => {
     assert.ok(still, "the deployment owner no longer exists");
     assert.equal(still.name, awesomeBefore.name);
 
-    const { count } = await db
-      .from("invoices")
-      .select("*", { count: "exact", head: true })
-      .eq("org_id", AWESOME_ORG_ID);
-    assert.ok((count ?? 0) > 0, "the deployment owner lost its invoices");
+    assert.equal(
+      await awesomeInvoiceCount(),
+      awesomeInvoicesBefore,
+      "the deployment owner lost invoices",
+    );
   });
 
   test("a business that does not exist is refused too", async () => {
@@ -315,11 +330,11 @@ describe("the monthly sweep takes every trial, whatever its age", () => {
     assert.ok(still, "the deployment owner no longer exists");
     assert.equal(still.name, awesomeBefore.name);
 
-    const { count } = await db
-      .from("invoices")
-      .select("*", { count: "exact", head: true })
-      .eq("org_id", AWESOME_ORG_ID);
-    assert.ok((count ?? 0) > 0, "the deployment owner lost its invoices");
+    assert.equal(
+      await awesomeInvoiceCount(),
+      awesomeInvoicesBefore,
+      "the deployment owner lost invoices",
+    );
   });
 });
 

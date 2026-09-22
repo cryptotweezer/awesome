@@ -1,4 +1,5 @@
 import "server-only";
+import { AWESOME_ORG_ID } from "@/lib/data/org";
 import type { Issuer, Org } from "@/lib/types";
 
 /**
@@ -68,6 +69,58 @@ There is no limit on how much you and I talk: the allowance the
 dashboard mentions is for the little assistant built into the web app, which
 runs on the app owner's account. You are the user's own AI, and every call you
 make here is free of that.
+`;
+}
+
+/**
+ * The savings plan, for the one business that has one.
+ *
+ * Empty for everybody else, and that is not politeness: an agent reading a tool
+ * list will try what is on it, so telling a guest about tools their key cannot
+ * reach buys nothing but a failed call and a confused owner.
+ */
+function savingsSection(org: Org): string {
+  if (org.id !== AWESOME_ORG_ID) return "";
+  return `
+**The savings plan** (this business only)
+
+Two things run side by side here. Billing is what was sent to a client and
+whether it was paid. The savings plan is what the household and the business
+take in, what they spend, and what is left. They meet in one place: an invoice
+dated inside a week shows up in that week automatically, and its payment is read
+from the invoice. Never record a payment twice.
+
+- \`savings_overview\`: **read this first.** How the plan is going, the current
+  week, and every week still open with what each is waiting on.
+- \`savings_week\`: one week in full. Say \`"this week"\`, \`"last week"\`, or any
+  date inside the one you mean.
+- \`savings_weeks\`: a stretch of weeks, for questions about a month.
+- \`rotation\`: who is normally due in each of the two weeks, by day. The plan,
+  not what happened.
+- \`weekly_expenses\`, \`loans_status\`: the standing costs, and what is owed.
+
+Writing:
+
+- \`mark_service\`: the exception, not the routine. A job whose day has gone by
+  is recorded as done by itself, so this is for "X cancelled this week" (that
+  money leaves that week and no other week moves), "X was done on Thursday
+  instead" and extra work on top.
+- \`record_week_payment\`: money in from a client with no invoice behind them,
+  cash or a plain transfer. For an invoiced client, mark the **invoice** paid
+  instead and the week follows it.
+- \`add_week_job\`: work the rotation did not expect. A one-off job creates no
+  client: it belongs to that week and nowhere else.
+- \`set_week_cost\`: what something really cost this week. Never changes the
+  standing amount, so no past week moves.
+- \`close_savings_week\`: **ask the owner to confirm what was saved** before
+  calling this. The figure recorded is what the plan counts. It refuses while
+  money that arrives by bank has not landed: an invoiced client needs the
+  invoice raised and paid, a transfer client needs the payment recorded. Cash
+  never blocks.
+- \`reopen_savings_week\`: nothing is sealed. A client who pays late is normal.
+- \`record_loan_payment\`, \`update_savings_plan\`.
+
+The loans come first: saving does not begin until they are cleared.
 `;
 }
 
@@ -172,6 +225,7 @@ ${limitsSection(org)}
   an **Excel workbook** (a sheet per table), which is what somebody means when
   they ask for their data. Only pass \`format: "json"\` when they ask for JSON:
   that is the complete, restorable copy rather than the readable one.
+${savingsSection(org)}
 
 ## Creating an invoice
 

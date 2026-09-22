@@ -83,6 +83,30 @@ export async function orgForPage(): Promise<Org> {
   return org;
 }
 
+/**
+ * Is this Awesome's own business?
+ *
+ * This repo is Awesome's. The clean, general version of the app lives in its
+ * own repository, so there is nothing to keep generic here and no reason to
+ * build feature flags: "belongs to Awesome" is literally what is being asked.
+ * Everything under /savings is gated on this, and only on this.
+ */
+export function isAwesome(org: Pick<Org, "id"> | null | undefined): boolean {
+  return org?.id === AWESOME_ORG_ID;
+}
+
+/**
+ * The business a /savings page belongs to, or back to the dashboard.
+ *
+ * A guest org has no business here: the section does not exist for them, so
+ * they are returned to the overview rather than shown a door they cannot open.
+ */
+export async function awesomeForPage(): Promise<Org> {
+  const org = (await getCurrentOrg())?.org;
+  if (!org || !isAwesome(org)) redirect("/");
+  return org;
+}
+
 /** Load one org by id. Used by the gateway, which authenticates by key. */
 export async function getOrg(orgId: string): Promise<Org | null> {
   const db = createAdminClient();

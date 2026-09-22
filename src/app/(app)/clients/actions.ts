@@ -45,6 +45,44 @@ export async function saveClientAction(
     default_rate: rate,
   };
 
+  // Only the savings form carries these. Absent means untouched rather than
+  // cleared, which is what keeps the ordinary client form, and every business
+  // that uses it, exactly as it was.
+  const billingType = str(formData, "billing_type");
+  if (billingType) {
+    if (!["invoice", "transfer", "cash"].includes(billingType)) {
+      return { ok: false, error: "Unknown payment type." };
+    }
+    input.billing_type = billingType as typeof input.billing_type;
+  }
+
+  const cadence = str(formData, "cadence");
+  if (cadence) {
+    const allowed = [
+      "weekly",
+      "fortnightly",
+      "monthly",
+      "every_n_weeks",
+      "occasional",
+    ];
+    if (!allowed.includes(cadence)) {
+      return { ok: false, error: "Unknown frequency." };
+    }
+    input.cadence = cadence as ClientInput["cadence"];
+
+    // The number of weeks means nothing for any other cadence, so it is
+    // cleared rather than left behind to confuse the next reader.
+    if (cadence === "every_n_weeks") {
+      const weeks = Number(str(formData, "cadence_weeks"));
+      if (!Number.isInteger(weeks) || weeks < 1 || weeks > 52) {
+        return { ok: false, error: "Weeks must be a whole number from 1 to 52." };
+      }
+      input.cadence_weeks = weeks;
+    } else {
+      input.cadence_weeks = null;
+    }
+  }
+
   try {
     const { org } = await requireOrg();
     if (id) {
@@ -60,6 +98,7 @@ export async function saveClientAction(
   }
 
   revalidatePath("/clients");
+  revalidatePath("/savings/clients");
   revalidatePath("/");
   return { ok: true };
 }
@@ -80,6 +119,7 @@ export async function deleteClientAction(
     };
   }
   revalidatePath("/clients");
+  revalidatePath("/savings/clients");
   revalidatePath("/");
   return { ok: true };
 }
@@ -109,6 +149,7 @@ export async function setClientActiveAction(
     };
   }
   revalidatePath("/clients");
+  revalidatePath("/savings/clients");
   revalidatePath("/");
   return { ok: true };
 }

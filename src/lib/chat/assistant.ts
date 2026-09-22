@@ -1,5 +1,5 @@
 import "server-only";
-import { tools, type ToolContext, type ToolDef } from "@/lib/gateway/tools";
+import { registryFor, type ToolContext, type ToolDef } from "@/lib/gateway/tools";
 import { runTool } from "@/lib/gateway/dispatch";
 import { resolveClient, resolveIssuer } from "@/lib/gateway/documents";
 import { getInvoiceByRef } from "@/lib/data/invoices";
@@ -225,15 +225,26 @@ const linkTools: Record<string, ToolDef> = {
   },
 };
 
-const chatTools: Record<string, ToolDef> = {
-  ...Object.fromEntries(
-    Object.entries(tools).filter(([name]) => !WITHOUT_FILES.has(name)),
-  ),
-  ...linkTools,
-};
+/**
+ * What this conversation can run, for this business.
+ *
+ * Built per request rather than once at import, because the savings plan is
+ * Awesome's and nobody else's: the same reasoning as the gateway's own
+ * registry, which this borrows so the two can never disagree about what a
+ * business has.
+ */
+async function chatToolsFor(orgId: string): Promise<Record<string, ToolDef>> {
+  const registry = await registryFor(orgId);
+  return {
+    ...Object.fromEntries(
+      Object.entries(registry).filter(([name]) => !WITHOUT_FILES.has(name)),
+    ),
+    ...linkTools,
+  };
+}
 
 /** The registry, in the shape OpenAI wants. One source, two audiences. */
-function toolDefinitions() {
+function toolDefinitions(chatTools: Record<string, ToolDef>) {
   return Object.entries(chatTools).map(([name, def]) => ({
     type: "function" as const,
     function: {
@@ -247,6 +258,7 @@ function toolDefinitions() {
 async function callOpenAi(
   messages: OpenAiMessage[],
   apiKey: string,
+  chatTools: Record<string, ToolDef>,
 ): Promise<OpenAiMessage> {
   const res = await fetch(OPENAI_URL, {
     method: "POST",
@@ -257,7 +269,7 @@ async function callOpenAi(
     body: JSON.stringify({
       model: MODEL,
       messages,
-      tools: toolDefinitions(),
+      tools: toolDefinitions(chatTools),
       temperature: 0.2,
     }),
   });
@@ -299,6 +311,9 @@ export async function runAssistant(
     );
   }
 
+  // What this business can run. Awesome has the savings plan; nobody else does.
+  const chatTools = await chatToolsFor(org.id);
+
   const messages: OpenAiMessage[] = [
     { role: "system", content: systemPrompt(org, member) },
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -307,7 +322,7 @@ export async function runAssistant(
   const usedTools: string[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const reply = await callOpenAi(messages, apiKey);
+    const reply = await callOpenAi(messages, apiKey, chatTools);
     messages.push(reply);
 
     const calls = reply.tool_calls ?? [];

@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import type { ClientWithIssuer, Issuer } from "@/lib/types";
+import type { BillingType, Cadence, ClientWithIssuer, Issuer } from "@/lib/types";
+import { aud } from "@/lib/savings";
 import {
   saveClientAction,
   deleteClientAction,
@@ -13,9 +14,28 @@ const initial: ActionState = { ok: false };
 
 const BLANK = "–"; // en dash, for a cell with nothing in it
 
-function formatRate(rate: number | null) {
+/**
+ * The savings dashboard reads money as `AUD 2.000`; the billing dashboard, and
+ * every business that is not Awesome, keeps the Australian `AUD 2000.00`.
+ */
+function formatRate(rate: number | null, savings: boolean) {
   if (rate === null) return BLANK;
-  return `AUD ${rate.toFixed(2)}`;
+  return savings ? aud(rate) : `AUD ${rate.toFixed(2)}`;
+}
+
+const CADENCES: { value: Cadence; label: string }[] = [
+  { value: "weekly", label: "Weekly" },
+  { value: "fortnightly", label: "Fortnightly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "every_n_weeks", label: "Every N weeks" },
+  { value: "occasional", label: "Whenever they ask" },
+];
+
+function formatCadence(c: ClientWithIssuer) {
+  if (c.cadence === "every_n_weeks") {
+    return c.cadence_weeks ? `Every ${c.cadence_weeks} weeks` : "Every N weeks";
+  }
+  return CADENCES.find((x) => x.value === c.cadence)?.label ?? c.cadence;
 }
 
 export function ClientsManager({
@@ -23,6 +43,7 @@ export function ClientsManager({
   issuers,
   perClientDefaults,
   defaultDescription,
+  savings = false,
 }: {
   clients: ClientWithIssuer[];
   issuers: Issuer[];
@@ -34,6 +55,13 @@ export function ClientsManager({
    */
   perClientDefaults: boolean;
   defaultDescription: string;
+  /**
+   * The savings dashboard's version of this list, which is Awesome's only.
+   * It adds the two things the savings plan needs and billing has no use for:
+   * whether a client is invoiced or pays cash, and how often they are done.
+   * Everywhere else the list is exactly what it has always been.
+   */
+  savings?: boolean;
 }) {
   // null = closed; "new" = add; otherwise the client being edited.
   const [editing, setEditing] = useState<ClientWithIssuer | "new" | null>(null);
@@ -43,24 +71,30 @@ export function ClientsManager({
   // clients reads as the client's own ABN, which this app never asks for.
   const showIssuer = issuers.length > 1;
 
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <button
-          onClick={() => setEditing("new")}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
-        >
-          + Add client
-        </button>
-      </div>
+  // Two lists rather than one, and the line between them is where the money
+  // arrives, not whether a document is issued. Everybody who pays into the
+  // account is one relationship you chase by bank; somebody who hands over
+  // money on the day is another. A client in the first list who is never
+  // invoiced carries a badge saying so, which is the only difference that
+  // matters once the money is in the same place.
+  const invoiced = clients.filter((c) => c.billing_type !== "cash");
+  const cash = clients.filter((c) => c.billing_type === "cash");
 
-      <div className="overflow-x-auto rounded-2xl bg-white dark:bg-slate-900 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
+  const table = (
+    rows: ClientWithIssuer[],
+    empty: string,
+    // A cash client is never issued anything, so the ABN column would be a
+    // dash on every row.
+    cashList = false,
+  ) => (
+    <div className="overflow-x-auto rounded-2xl bg-white dark:bg-slate-900 shadow-sm ring-1 ring-slate-200 dark:ring-slate-800">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 dark:border-slate-800 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
               <th className="px-4 py-3 font-medium">Client</th>
               <th className="px-4 py-3 font-medium">Address</th>
-              {showIssuer && (
+              {savings && <th className="px-4 py-3 font-medium">Every</th>}
+              {showIssuer && !cashList && (
                 <th className="px-4 py-3 font-medium">Billed by</th>
               )}
               {perClientDefaults && (
@@ -70,17 +104,22 @@ export function ClientsManager({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {clients.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + (showIssuer ? 1 : 0) + (perClientDefaults ? 1 : 0)}
+                  colSpan={
+                    3 +
+                    (savings ? 1 : 0) +
+                    (showIssuer && !cashList ? 1 : 0) +
+                    (perClientDefaults ? 1 : 0)
+                  }
                   className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
                 >
-                  No clients yet.
+                  {empty}
                 </td>
               </tr>
             )}
-            {clients.map((c) => (
+            {rows.map((c) => (
               <tr
                 key={c.id}
                 className="hover:bg-slate-50 dark:hover:bg-slate-800"
@@ -101,6 +140,14 @@ export function ClientsManager({
                         Archived
                       </span>
                     )}
+                    {c.billing_type === "transfer" && (
+                      <span
+                        title="Pays into the account and is never invoiced"
+                        className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-800 dark:bg-violet-950/60 dark:text-violet-300"
+                      >
+                        No invoice
+                      </span>
+                    )}
                   </div>
                   {c.email && (
                     <div className="text-xs text-slate-400 dark:text-slate-500">
@@ -113,7 +160,12 @@ export function ClientsManager({
                     .filter(Boolean)
                     .join(", ") || BLANK}
                 </td>
-                {showIssuer && (
+                {savings && (
+                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
+                    {formatCadence(c)}
+                  </td>
+                )}
+                {showIssuer && !cashList && (
                   <td className="px-4 py-3">
                     {c.issuer ? (
                       <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -128,7 +180,7 @@ export function ClientsManager({
                 )}
                 {perClientDefaults && (
                   <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
-                    {formatRate(c.default_rate)}
+                    {formatRate(c.default_rate, savings)}
                   </td>
                 )}
                 <td className="px-4 py-3">
@@ -147,7 +199,40 @@ export function ClientsManager({
             ))}
           </tbody>
         </table>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setEditing("new")}
+          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+        >
+          + Add client
+        </button>
       </div>
+
+      {savings ? (
+        <>
+          <ClientGroup
+            title="Into the account"
+            note="Money arrives by transfer. Most are invoiced; the ones marked No invoice pay online without a document."
+            count={invoiced.length}
+          >
+            {table(invoiced, "Nobody paying into the account yet.")}
+          </ClientGroup>
+          <ClientGroup
+            title="Cash"
+            note="Paid in person and never invoiced. They exist here and nowhere else."
+            count={cash.length}
+          >
+            {table(cash, "No cash clients yet.", true)}
+          </ClientGroup>
+        </>
+      ) : (
+        table(clients, "No clients yet.")
+      )}
 
       {editing !== null && (
         <ClientDialog
@@ -155,10 +240,39 @@ export function ClientsManager({
           issuers={issuers}
           perClientDefaults={perClientDefaults}
           defaultDescription={defaultDescription}
+          savings={savings}
           onClose={() => setEditing(null)}
         />
       )}
     </div>
+  );
+}
+
+/** One of the two client lists, with what makes it different said out loud. */
+function ClientGroup({
+  title,
+  note,
+  count,
+  children,
+}: {
+  title: string;
+  note: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          {title}
+        </h2>
+        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+          {count}
+        </span>
+        <p className="text-xs text-slate-500 dark:text-slate-400">{note}</p>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -167,15 +281,26 @@ function ClientDialog({
   issuers,
   perClientDefaults,
   defaultDescription,
+  savings,
   onClose,
 }: {
   client: ClientWithIssuer | null;
   issuers: Issuer[];
   perClientDefaults: boolean;
   defaultDescription: string;
+  savings: boolean;
   onClose: () => void;
 }) {
   const [state, action, pending] = useActionState(saveClientAction, initial);
+
+  // Both drive what the rest of the form shows, so they are state rather than
+  // plain defaults: a cash client is never issued anything, and the number of
+  // weeks only means something for one cadence.
+  const [billingType, setBillingType] = useState<BillingType>(
+    client?.billing_type ?? "invoice",
+  );
+  const [cadence, setCadence] = useState<Cadence>(client?.cadence ?? "weekly");
+  const cash = savings && billingType === "cash";
 
   useEffect(() => {
     if (state.ok) onClose();
@@ -218,10 +343,72 @@ function ClientDialog({
             />
           </Field>
 
+          {/* Awesome only. Everything below this pair is the same form it has
+              always been; these two are what the savings plan needs and
+              billing has no opinion about. */}
+          {savings && (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="How they pay">
+                <select
+                  name="billing_type"
+                  value={billingType}
+                  onChange={(e) =>
+                    setBillingType(e.target.value as BillingType)
+                  }
+                  className="input"
+                >
+                  <option value="invoice">Invoice, into the account</option>
+                  <option value="transfer">
+                    Into the account, never invoiced
+                  </option>
+                  <option value="cash">Cash, never invoiced</option>
+                </select>
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="How often">
+                  <select
+                    name="cadence"
+                    value={cadence}
+                    onChange={(e) => setCadence(e.target.value as Cadence)}
+                    className="input"
+                  >
+                    {CADENCES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {cadence === "every_n_weeks" && (
+                  <Field label="Weeks" required>
+                    <input
+                      name="cadence_weeks"
+                      type="number"
+                      min="1"
+                      max="52"
+                      required
+                      defaultValue={client?.cadence_weeks ?? 3}
+                      className="input"
+                    />
+                  </Field>
+                )}
+              </div>
+            </div>
+          )}
+
+          {cash && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900">
+              A cash client is never invoiced: they do not appear in the invoice
+              history, in the client picker or on any document. Their rate is
+              what you expect from them each time they are done.
+            </p>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             {/* With one ABN there is nothing to choose: it is filled in for
-                them so every client still carries a default issuer. */}
-            {issuers.length === 1 ? (
+                them so every client still carries a default issuer. Nothing is
+                ever issued to a cash client, so they get no ABN at all. */}
+            {cash ? null : issuers.length === 1 ? (
               <input
                 type="hidden"
                 name="default_issuer_id"

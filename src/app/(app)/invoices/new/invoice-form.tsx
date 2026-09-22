@@ -59,6 +59,7 @@ export function InvoiceForm({
   defaultDescription = "",
   action,
   initial = null,
+  editing,
   submitLabel = "Create invoice",
 }: {
   clients: ClientWithIssuer[];
@@ -84,9 +85,18 @@ export function InvoiceForm({
   defaultDescription?: string;
   action: (payload: InvoiceFormPayload) => Promise<InvoiceFormResult>;
   initial?: InvoiceFormInitial | null;
+  /**
+   * Whether this is correcting an existing invoice.
+   *
+   * Normally the same thing as having `initial`, but not always: a new invoice
+   * opened from a week arrives prefilled with that client and that day, and is
+   * still a new invoice. Getting this wrong would keep the lines from being
+   * refilled when the client is changed, and label the button "Saving".
+   */
+  editing?: boolean;
   submitLabel?: string;
 }) {
-  const isEdit = initial != null;
+  const isEdit = editing ?? initial != null;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

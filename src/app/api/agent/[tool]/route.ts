@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { authenticateAgent, unauthorizedHeaders } from "@/lib/gateway/auth";
 import { appBaseUrl } from "@/lib/app-url";
 import { runTool } from "@/lib/gateway/dispatch";
+import { registryFor } from "@/lib/gateway/tools";
 import { protectGateway } from "@/lib/security/arcjet";
 
 /**
@@ -46,8 +47,11 @@ export async function POST(
 
   // Everything that happens around a tool call (the scope gate, the retry
   // guard, the log) lives in one dispatcher both transports share, so this
-  // route only has to turn the outcome into HTTP.
-  const outcome = await runTool(tool, input, agent);
+  // route only has to turn the outcome into HTTP. The registry is built per
+  // business: a tool one has and another does not is simply unknown here.
+  const outcome = await runTool(tool, input, agent, {
+    registry: await registryFor(agent.orgId),
+  });
   return outcome.ok
     ? json({ ok: true, result: outcome.result }, 200)
     : json({ ok: false, error: outcome.error }, outcome.status);

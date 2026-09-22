@@ -1,0 +1,286 @@
+import "server-only";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { todayInSydney } from "@/lib/format";
+import type { SavingsPlan } from "@/lib/types";
+
+/**
+ * Savings plans, one after another.
+ *
+ * A business runs one plan at a time and keeps every plan it has run. That is
+ * the whole point of having more than one: a two-year plan is hard to believe
+ * in, three six-month plans are not, and "did I make the last one" is the
+ * question this section exists to answer.
+ *
+ * Two rules hold the model together, and both are about not having two answers
+ * to the same question:
+ *
+ *   * plans never overlap. A week belongs to one plan, so a new plan starts
+ *     after the previous one ends. `startPlan` refuses anything else.
+ *   * finished is derived from the date, never stored. A plan is running while
+ *     `ends_on` is still ahead, the same way an invoice is overdue only
+ *     because of today's date. Its result cannot drift either: each of its
+ *     weeks froze its own figures as it closed.
+ *
+ * `ends_on` is a generated column, so the arithmetic that turns a horizon in
+ * months into a last date lives in the database and cannot disagree with a
+ * copy of it in here.
+ */
+
+const num = (v: unknown) => Number(v ?? 0);
+
+function normalise(row: Record<string, unknown>): SavingsPlan {
+  return {
+    ...(row as unknown as SavingsPlan),
+    weekly_target: num(row.weekly_target),
+  };
+}
+
+/** Every plan this business has run, newest first. */
+export async function listPlans(orgId: string): Promise<SavingsPlan[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .select("*")
+    .eq("org_id", orgId)
+    .order("starts_on", { ascending: false });
+  if (error) throw new Error(`Failed to load the plans: ${error.message}`);
+  return (data ?? []).map(normalise);
+}
+
+/**
+ * The plan running today, or null.
+ *
+ * Null is a real answer and the reason nothing is created on read any more: a
+ * business between plans has no plan, and inventing a blank one would put an
+ * empty plan back on screen the moment the last one finished.
+ */
+export async function currentPlan(
+  orgId: string,
+  today = todayInSydney(),
+): Promise<SavingsPlan | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .select("*")
+    .eq("org_id", orgId)
+    .gte("ends_on", today)
+    .order("starts_on", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the plan: ${error.message}`);
+  return data ? normalise(data) : null;
+}
+
+/** One plan of this business, by id. */
+export async function getPlan(
+  orgId: string,
+  id: string,
+): Promise<SavingsPlan | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the plan: ${error.message}`);
+  return data ? normalise(data) : null;
+}
+
+/** The plan a date falls inside, which is the plan the week belongs to. */
+export async function planOn(
+  orgId: string,
+  date: string,
+): Promise<SavingsPlan | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .select("*")
+    .eq("org_id", orgId)
+    .lte("starts_on", date)
+    .gte("ends_on", date)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the plan: ${error.message}`);
+  return data ? normalise(data) : null;
+}
+
+export type NewPlan = {
+  name?: string | null;
+  starts_on: string;
+  weekly_target: number;
+  horizon_months: number;
+  notes?: string | null;
+};
+
+/**
+ * Start a plan.
+ *
+ * Refused if it would overlap one that already exists, because a week cannot
+ * belong to two plans and the overlap would be invisible afterwards: the weeks
+ * would simply attach to whichever plan was found first.
+ */
+export async function startPlan(
+  orgId: string,
+  input: NewPlan,
+): Promise<SavingsPlan> {
+  const supabase = createAdminClient();
+
+  const clash = await overlapping(orgId, input.starts_on, input.horizon_months);
+  if (clash) {
+    throw new Error(
+      `That overlaps the plan running from ${clash.starts_on} to ${clash.ends_on}. ` +
+        `A new plan starts after the last one ends.`,
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .insert({
+      org_id: orgId,
+      name: input.name ?? null,
+      starts_on: input.starts_on,
+      weekly_target: input.weekly_target,
+      horizon_months: input.horizon_months,
+      notes: input.notes ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to start the plan: ${error.message}`);
+  return normalise(data);
+}
+
+export type PlanPatch = {
+  name?: string | null;
+  starts_on?: string;
+  weekly_target?: number;
+  horizon_months?: number;
+  notes?: string | null;
+};
+
+/**
+ * Change a plan.
+ *
+ * Moving its dates is checked against the other plans for the same reason
+ * starting one is. Weeks already opened under it keep their `plan_id`: a week
+ * that falls outside the new dates stops counting towards the plan's figures
+ * but is not deleted, because what happened in it still happened.
+ */
+export async function updatePlan(
+  orgId: string,
+  id: string,
+  patch: PlanPatch,
+): Promise<SavingsPlan> {
+  const supabase = createAdminClient();
+  const plan = await getPlan(orgId, id);
+  if (!plan) throw new Error("Plan not found");
+
+  const startsOn = patch.starts_on ?? plan.starts_on;
+  const horizon = patch.horizon_months ?? plan.horizon_months;
+  if (startsOn !== plan.starts_on || horizon !== plan.horizon_months) {
+    const clash = await overlapping(orgId, startsOn, horizon, id);
+    if (clash) {
+      throw new Error(
+        `That would overlap the plan from ${clash.starts_on} to ${clash.ends_on}.`,
+      );
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("savings_plans")
+    .update(patch)
+    .eq("org_id", orgId)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to save the plan: ${error.message}`);
+  return normalise(data);
+}
+
+/**
+ * Delete a plan, and every week that was run under it.
+ *
+ * The weeks go by cascade, and with them the record of what was done each day,
+ * what was paid and what each week cost. Nothing on the billing side moves:
+ * the only link between the two halves points from a week's line TO an
+ * invoice, never back, so the documents outlive the record of the days they
+ * were for. Clients, the rotation, the fixed costs and the loans are not part
+ * of a plan at all.
+ */
+export async function deletePlan(
+  orgId: string,
+  id: string,
+): Promise<{ weeks: number }> {
+  const supabase = createAdminClient();
+
+  const { count } = await supabase
+    .from("savings_weeks")
+    .select("*", { count: "exact", head: true })
+    .eq("org_id", orgId)
+    .eq("plan_id", id);
+
+  const { error } = await supabase
+    .from("savings_plans")
+    .delete()
+    .eq("org_id", orgId)
+    .eq("id", id);
+  if (error) throw new Error(`Failed to delete the plan: ${error.message}`);
+
+  return { weeks: count ?? 0 };
+}
+
+/** The first plan whose dates would collide with these, if any. */
+async function overlapping(
+  orgId: string,
+  startsOn: string,
+  horizonMonths: number,
+  exceptId?: string,
+): Promise<SavingsPlan | null> {
+  const endsOn = lastDayOf(startsOn, horizonMonths);
+  const supabase = createAdminClient();
+  let query = supabase
+    .from("savings_plans")
+    .select("*")
+    .eq("org_id", orgId)
+    .lte("starts_on", endsOn)
+    .gte("ends_on", startsOn);
+  if (exceptId) query = query.neq("id", exceptId);
+
+  const { data, error } = await query.limit(1);
+  if (error) throw new Error(`Failed to check the plans: ${error.message}`);
+  return data && data.length > 0 ? normalise(data[0]) : null;
+}
+
+/**
+ * The last day a plan starting then, running that long, would cover.
+ *
+ * The same arithmetic as the `ends_on` generated column, needed here only
+ * because an overlap has to be checked BEFORE the row exists. Everywhere else
+ * reads the column.
+ */
+export function lastDayOf(startsOn: string, horizonMonths: number): string {
+  const weeks = Math.round((horizonMonths / 12) * 52);
+  const [y, m, d] = startsOn.split("-").map(Number);
+  const at = Date.UTC(y, m - 1, d) + (weeks * 7 - 1) * 86_400_000;
+  return new Date(at).toISOString().slice(0, 10);
+}
+
+/** How many weeks a plan covers. */
+export function weeksOf(plan: SavingsPlan): number {
+  return Math.round((plan.horizon_months / 12) * 52);
+}
+
+/**
+ * The total the plan adds up to, derived and never stored.
+ *
+ * Weeks rather than months, because the plan is run weekly and a month is not
+ * a whole number of them. 52 weeks a year is the figure a person checks this
+ * against, so it is the figure used.
+ */
+export function plannedTotal(plan: SavingsPlan): number {
+  return plan.weekly_target * weeksOf(plan);
+}
+
+/** Has this plan's last week gone by? */
+export function isFinished(plan: SavingsPlan, today = todayInSydney()): boolean {
+  return plan.ends_on < today;
+}

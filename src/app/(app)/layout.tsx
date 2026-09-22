@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { redirect } from "next/navigation";
-import { AWESOME_ORG_ID, getCurrentOrg } from "@/lib/data/org";
+import { getCurrentOrg, isAwesome } from "@/lib/data/org";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AssistantWidget } from "@/components/assistant/assistant-widget";
@@ -46,7 +46,7 @@ export default async function AppLayout({
 
   const org = ctx?.org ?? null;
   const name = org ? (org.display_name ?? org.name) : "Your business";
-  const isAwesome = org?.id === AWESOME_ORG_ID;
+  const awesome = isAwesome(org);
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950">
@@ -69,7 +69,7 @@ export default async function AppLayout({
                 height={32}
                 className="h-8 w-8 rounded object-contain"
               />
-            ) : isAwesome ? (
+            ) : awesome ? (
               <>
                 <Image
                   src="/logo_black.png"
@@ -97,7 +97,7 @@ export default async function AppLayout({
             </span>
           </Link>
 
-          <NavLinks disabled={!org} />
+          <NavLinks disabled={!org} savings={awesome} />
 
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-slate-500 md:inline dark:text-slate-400">

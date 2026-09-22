@@ -1,10 +1,17 @@
+import { redirect } from "next/navigation";
 import { listClients } from "@/lib/data/clients";
 import { listIssuers } from "@/lib/data/issuers";
-import { orgForPage } from "@/lib/data/org";
+import { isAwesome, orgForPage } from "@/lib/data/org";
 import { ClientsManager } from "./clients-manager";
 
 export default async function ClientsPage() {
   const org = await orgForPage();
+
+  // For Awesome this page moved: the client list belongs with the savings plan
+  // now, because that is where a client's rhythm and whether they are billed at
+  // all are decided. The URL still works, it just lands in the right place.
+  if (isAwesome(org)) redirect("/savings/clients");
+
   const [clients, issuers] = await Promise.all([
     listClients(org.id),
     listIssuers(org.id),

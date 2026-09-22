@@ -19,13 +19,31 @@ const LINKS = [
  * Before the business exists every one of these is switched off rather than
  * hidden. Hiding them would mean a new arrival never learns the app has a
  * History or a Statements page, which is half of what the tour is for.
+ *
+ * `savings` is Awesome's own section. Clients moved there, so it takes that
+ * slot rather than adding a sixth: the bar stays the same length and the tour,
+ * which points at these by name, still finds something under `nav-clients`.
  */
-export function NavLinks({ disabled = false }: { disabled?: boolean }) {
+export function NavLinks({
+  disabled = false,
+  savings = false,
+}: {
+  disabled?: boolean;
+  savings?: boolean;
+}) {
   const pathname = usePathname();
+
+  const links = savings
+    ? LINKS.map((l) =>
+        l.href === "/clients"
+          ? { href: "/savings", label: "Savings", tour: "nav-clients" }
+          : l,
+      )
+    : LINKS;
 
   return (
     <nav className="flex items-center gap-1">
-      {LINKS.map((link) => {
+      {links.map((link) => {
         const active =
           !disabled &&
           (link.href === "/" ? pathname === "/" : pathname.startsWith(link.href));

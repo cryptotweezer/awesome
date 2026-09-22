@@ -159,9 +159,53 @@ create table if not exists awesome.clients (
   default_issuer_id   uuid,
   default_description text,         -- optional: the usual work for this client
   default_rate        numeric(10,2),
+  -- Not every client is billed. 'invoice' is sent documents and appears in the
+  -- history; 'cash' is paid in person, is never invoiced, and exists only for
+  -- the savings plan. create_invoice and update_invoice refuse a cash client,
+  -- because a default is not a wall.
+  billing_type        text          not null default 'invoice',
+  -- How often this client is normally done. Weekly and fortnightly form the
+  -- rotation; monthly and every_n_weeks are placed in the week they actually
+  -- happened; occasional has no rhythm at all and is worth nothing to a week
+  -- until the work is done.
+  cadence             text          not null default 'weekly',
+  cadence_weeks       integer,      -- only when cadence = 'every_n_weeks'
+  -- The two-week rotation. Two flags rather than one column, because the common
+  -- case is a client who is in BOTH weeks, and neither means the client is not
+  -- on the rotation at all and is recorded in the week it happened. This is the
+  -- plan, not the record: moving a client changes what is expected from here
+  -- on, never a week already closed.
+  --
+  -- The day is where inside the week: the ISO weekday, 1 = Monday. Null with
+  -- the flag still true means "in this week, day not decided", which is a real
+  -- state while a week is being arranged.
+  --
+  -- A day is a route, so its order matters and must not be alphabetical. Each
+  -- week carries a position, reassigned to the end every time the client is
+  -- placed: that is what makes moving somebody to another day put them at the
+  -- end of it rather than into the middle carrying an old number.
+  in_week_1           boolean       not null default false,
+  in_week_2           boolean       not null default false,
+  week_1_day          smallint,
+  week_2_day          smallint,
+  week_1_seq          integer,
+  week_2_seq          integer,
   is_active           boolean       not null default true,
   created_at          timestamptz   not null default now(),
   constraint clients_pkey primary key (id),
+  constraint clients_billing_type_check check (billing_type in ('invoice', 'transfer', 'cash')),
+  constraint clients_cadence_check
+    check (cadence in ('weekly', 'fortnightly', 'monthly', 'every_n_weeks', 'occasional')),
+  constraint clients_cadence_weeks_check check (
+    case when cadence = 'every_n_weeks'
+      then cadence_weeks is not null and cadence_weeks between 1 and 52
+      else true
+    end
+  ),
+  constraint clients_week_1_day_check
+    check (week_1_day is null or week_1_day between 1 and 7),
+  constraint clients_week_2_day_check
+    check (week_2_day is null or week_2_day between 1 and 7),
   constraint clients_default_issuer_id_fkey foreign key (default_issuer_id)
     references awesome.issuers(id),
   constraint clients_org_fkey foreign key (org_id)
@@ -374,6 +418,259 @@ create table if not exists awesome.agent_calls (
     references awesome.orgs(id) on delete cascade
 );
 
+-- What a week normally costs. A name and a standing weekly amount, and
+-- nothing else: a week that cost something different, and a one-off that
+-- happened once, both belong to that week rather than to the item, because
+-- editing the standing amount must never change a week already closed.
+--
+-- These are the household's outgoings as much as the business's. None of it
+-- reaches an invoice, a client statement or the tax report.
+create table if not exists awesome.expense_items (
+  id            uuid          not null default gen_random_uuid(),
+  org_id        uuid          not null,
+  name          text          not null,
+  weekly_amount numeric(10,2) not null default 0,
+  -- Which commitment this cost belongs to. Three, fixed: they are not going to
+  -- drift, and a lookup table would add a join and a screen to hold what fits
+  -- in a check constraint.
+  category      text          not null default 'australia',
+  -- An item that no longer applies is archived, not deleted.
+  is_active     boolean       not null default true,
+  sort_order    integer       not null default 0,
+  created_at    timestamptz   not null default now(),
+  updated_at    timestamptz   not null default now(),
+  constraint expense_items_pkey primary key (id),
+  constraint expense_items_name_not_blank check (btrim(name) <> ''),
+  constraint expense_items_amount_positive check (weekly_amount >= 0),
+  constraint expense_items_category_check
+    check (category in ('australia', 'colombia', 'visa')),
+  constraint expense_items_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- What is owed, and when saving is allowed to start.
+--
+-- A loan is not an expense item. An expense repeats forever and is only ever
+-- compared with other weeks; a loan has a total, a balance that falls, and an
+-- end. The loans come out first and the savings plan does not begin until they
+-- are gone, so "this one is finished" is a fact the whole ordering depends on.
+--
+-- The balance is NOT stored: it is the principal minus the payments recorded
+-- against it. A stored balance is a second copy of the same truth, and the
+-- first correction makes the two disagree with no way to tell which is right.
+create table if not exists awesome.loans (
+  id             uuid          not null default gen_random_uuid(),
+  org_id         uuid          not null,
+  name           text          not null,
+  principal      numeric(12,2) not null,   -- what was owed at the start
+  weekly_payment numeric(10,2) not null default 0,
+  -- Both optional. Some loans are paid on a schedule and have a date they are
+  -- meant to be gone by; others are paid whenever there is money for them, and
+  -- a date on those would be a guess that later reads as a fact. `ends_on` is
+  -- a target only: the balance decides when a loan is finished.
+  started_on     date,
+  ends_on        date,
+  notes          text,
+  is_active      boolean       not null default true,
+  sort_order     integer       not null default 0,
+  created_at     timestamptz   not null default now(),
+  updated_at     timestamptz   not null default now(),
+  constraint loans_pkey primary key (id),
+  constraint loans_name_not_blank check (btrim(name) <> ''),
+  constraint loans_principal_positive check (principal >= 0),
+  constraint loans_payment_positive check (weekly_payment >= 0),
+  constraint loans_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+create table if not exists awesome.loan_payments (
+  id          uuid          not null default gen_random_uuid(),
+  org_id      uuid          not null,
+  loan_id     uuid          not null,
+  amount      numeric(12,2) not null,
+  -- The day the money left, which is not always the day it was entered.
+  paid_on     date          not null,
+  note        text,
+  recorded_by text,         -- a person's name, or an agent's label
+  created_at  timestamptz   not null default now(),
+  constraint loan_payments_pkey primary key (id),
+  constraint loan_payments_amount_positive check (amount > 0),
+  constraint loan_payments_loan_fkey foreign key (loan_id)
+    references awesome.loans(id) on delete cascade,
+  constraint loan_payments_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- One row per business: the two numbers the plan is steered by. The total over
+-- the horizon is derived from the weekly amount, never stored, so there is one
+-- number to edit rather than three that can disagree. `starts_on` stays null
+-- until it is chosen: until the loans are gone there is no start date, and a
+-- default would invent one.
+create table if not exists awesome.savings_plans (
+  id             uuid          not null default gen_random_uuid(),
+  org_id         uuid          not null,
+  -- Optional, for the history to be readable: "Visa", "Car", "First year".
+  name           text,
+  starts_on      date          not null,
+  weekly_target  numeric(10,2) not null default 1000,
+  horizon_months integer       not null default 24,
+  -- 52 weeks a year, which is the figure this is checked against by hand.
+  -- Stored, not computed on read, so a query can find the plan a date is in
+  -- and whether it has finished.
+  ends_on        date generated always as (
+    starts_on + (round((horizon_months::numeric / 12) * 52)::int * 7 - 1)
+  ) stored,
+  notes          text,
+  created_at     timestamptz   not null default now(),
+  updated_at     timestamptz   not null default now(),
+  constraint savings_plans_pkey primary key (id),
+  constraint savings_plans_target_positive check (weekly_target >= 0),
+  constraint savings_plans_horizon_positive
+    check (horizon_months between 1 and 600),
+  -- Two plans starting the same day is always a mistake. Overlap in general is
+  -- refused by the write path, which knows the previous plan's end date.
+  constraint savings_plans_org_start_key unique (org_id, starts_on),
+  constraint savings_plans_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+create table if not exists awesome.savings_weeks (
+  id             uuid          not null default gen_random_uuid(),
+  org_id         uuid          not null,
+  -- The plan this week was run under. Plans are sequential and never overlap,
+  -- so a week belongs to exactly one. Deleting a plan takes its weeks with it.
+  plan_id       uuid          not null,
+  -- The first day of the week, in the business's timezone. Weeks run from the
+  -- weekday the plan started on, so this is not always a Monday.
+  week_start     date          not null,
+  week_end       date          not null,
+  -- Which side of the two-week rotation this week is, so it knows who was due.
+  rotation_week  smallint      not null,
+  -- Null while open or pending. Set when everything is in.
+  closed_at      timestamptz,
+  closed_by      text,
+  -- Frozen at close, so history stops moving. Null while the week is open, when
+  -- the figures are worked out live from the entries and the current expenses.
+  income_total   numeric(12,2),
+  expenses_total numeric(12,2),
+  saved_amount   numeric(12,2),
+  target_amount  numeric(12,2),
+  notes          text,
+  created_at     timestamptz   not null default now(),
+  updated_at     timestamptz   not null default now(),
+  constraint savings_weeks_pkey primary key (id),
+  constraint savings_weeks_unique unique (org_id, week_start),
+  constraint savings_weeks_plan_fkey foreign key (plan_id)
+    references awesome.savings_plans(id) on delete cascade,
+  constraint savings_weeks_rotation_check check (rotation_week in (1, 2)),
+  constraint savings_weeks_order_check check (week_end >= week_start),
+  constraint savings_weeks_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- One line of income in one week.
+--
+-- `client_id` is nullable on purpose. A one-off job, done once for somebody who
+-- is not a client and never will be, belongs to the week it happened in and
+-- nowhere else: creating a client for it would put a name in the client list
+-- forever to record an afternoon.
+--
+-- `client_name` is a snapshot for exactly the same reason an invoice snapshots
+-- who it was billed to. Renaming or deleting a client must not rewrite what a
+-- past week says happened.
+create table if not exists awesome.week_entries (
+  id            uuid          not null default gen_random_uuid(),
+  org_id        uuid          not null,
+  week_id       uuid          not null,
+  -- Null for a one-off job. Set for anyone in the client list.
+  client_id     uuid,
+  client_name   text          not null,
+  -- Where this line came from:
+  --   rotation  the plan said this client was due this week
+  --   adhoc     added to this week because the work happened
+  --   oneoff    a job for somebody who is not a client
+  source        text          not null default 'rotation',
+  -- expected  the plan says it should happen and it has not been settled yet
+  -- done      it happened
+  -- skipped   it did not happen: the money does not come in, and no other week
+  --           is affected. Work that did not happen is not a debt.
+  status        text          not null default 'expected',
+  -- The day it ACTUALLY happened, which starts from the rotation's day and can
+  -- move. Moving it here never touches the rotation.
+  day           smallint,
+  amount        numeric(12,2) not null default 0,
+  -- Additional work on top of the usual job.
+  extra_amount  numeric(12,2) not null default 0,
+  extra_note    text,
+  -- How this one was paid THIS week, which is not always the usual way.
+  method        text          not null default 'cash',
+  paid          boolean       not null default false,
+  paid_on       date,
+  -- The invoice that covers this line, when there is one. This is what keeps
+  -- the two halves of the app in step: the payment is recorded once, on the
+  -- invoice, and read here.
+  invoice_id    uuid,
+  note          text,
+  sort_order    integer       not null default 0,
+  created_at    timestamptz   not null default now(),
+  updated_at    timestamptz   not null default now(),
+  constraint week_entries_pkey primary key (id),
+  constraint week_entries_status_check check (status in ('expected', 'done', 'skipped')),
+  constraint week_entries_source_check check (source in ('rotation', 'adhoc', 'oneoff')),
+  constraint week_entries_method_check check (method in ('cash', 'account', 'transfer')),
+  constraint week_entries_day_check check (day is null or day between 1 and 7),
+  constraint week_entries_name_not_blank check (btrim(client_name) <> ''),
+  -- One line per client per week. A second visit in the same week is extra work
+  -- on the same line, which is what it is.
+  constraint week_entries_client_unique unique (week_id, client_id),
+  constraint week_entries_week_fkey foreign key (week_id)
+    references awesome.savings_weeks(id) on delete cascade,
+  -- A client can be deleted; the week keeps the name it recorded.
+  constraint week_entries_client_fkey foreign key (client_id)
+    references awesome.clients(id) on delete set null,
+  constraint week_entries_invoice_fkey foreign key (invoice_id)
+    references awesome.invoices(id) on delete set null,
+  constraint week_entries_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+-- What a week cost, when it did not cost the usual.
+--
+-- While a week is open this table holds ONLY the differences: a fixed expense
+-- that came in higher this week, and the one-off that nobody planned for. The
+-- rest is read live from the standing list, so adding an expense today applies
+-- to this week without touching any other.
+--
+-- When the week closes, the full list is written here as it stood, and the week
+-- stops listening to the standing amounts. That is what freezes history.
+create table if not exists awesome.week_expenses (
+  id              uuid          not null default gen_random_uuid(),
+  org_id          uuid          not null,
+  week_id         uuid          not null,
+  -- Null for a one-off that is not on the standing list at all.
+  expense_item_id uuid,
+  name            text          not null,
+  category        text          not null default 'australia',
+  amount          numeric(12,2) not null,
+  -- override  this standing expense cost something different this week
+  -- oneoff    something that happened once
+  -- snapshot  written at close, a copy of the standing amount as it then was
+  kind            text          not null default 'oneoff',
+  note            text,
+  created_at      timestamptz   not null default now(),
+  updated_at      timestamptz   not null default now(),
+  constraint week_expenses_pkey primary key (id),
+  constraint week_expenses_kind_check check (kind in ('override', 'oneoff', 'snapshot')),
+  constraint week_expenses_amount_check check (amount >= 0),
+  constraint week_expenses_name_not_blank check (btrim(name) <> ''),
+  constraint week_expenses_week_fkey foreign key (week_id)
+    references awesome.savings_weeks(id) on delete cascade,
+  constraint week_expenses_item_fkey foreign key (expense_item_id)
+    references awesome.expense_items(id) on delete set null,
+  constraint week_expenses_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
 create index if not exists oauth_codes_expiry_idx on awesome.oauth_codes (expires_at);
 create index if not exists oauth_tokens_org_idx   on awesome.oauth_tokens (org_id);
 create index if not exists oauth_tokens_live_idx  on awesome.oauth_tokens (org_id, created_at desc)
@@ -392,6 +689,19 @@ create index if not exists agent_calls_org_idx      on awesome.agent_calls (org_
 create index if not exists agent_calls_cred_idx     on awesome.agent_calls (credential_id, at desc);
 create index if not exists agent_calls_age_idx     on awesome.agent_calls (at);
 create index if not exists agent_writes_age_idx     on awesome.agent_writes (created_at);
+create index if not exists expense_items_org_idx    on awesome.expense_items (org_id, category, sort_order, name);
+create index if not exists loans_org_idx            on awesome.loans (org_id, sort_order, name);
+create index if not exists loan_payments_loan_idx   on awesome.loan_payments (loan_id, paid_on desc);
+create index if not exists loan_payments_org_idx    on awesome.loan_payments (org_id, paid_on desc);
+create index if not exists savings_plans_org_idx    on awesome.savings_plans (org_id, starts_on desc);
+create index if not exists savings_weeks_org_idx   on awesome.savings_weeks (org_id, week_start desc);
+create index if not exists savings_weeks_plan_idx  on awesome.savings_weeks (plan_id, week_start);
+create index if not exists savings_weeks_open_idx  on awesome.savings_weeks (org_id, week_start) where closed_at is null;
+create index if not exists week_entries_week_idx    on awesome.week_entries (week_id, sort_order);
+create index if not exists week_entries_org_idx     on awesome.week_entries (org_id);
+create index if not exists week_entries_invoice_idx on awesome.week_entries (invoice_id) where invoice_id is not null;
+create index if not exists week_expenses_week_idx   on awesome.week_expenses (week_id);
+create index if not exists week_expenses_org_idx    on awesome.week_expenses (org_id);
 
 -- ---------------------------------------------------------------------
 --  Access. RLS on, no policies: service_role only, from the server only.
@@ -408,6 +718,13 @@ alter table awesome.oauth_codes   enable row level security;
 alter table awesome.oauth_tokens  enable row level security;
 alter table awesome.agent_writes  enable row level security;
 alter table awesome.agent_calls   enable row level security;
+alter table awesome.expense_items enable row level security;
+alter table awesome.loans         enable row level security;
+alter table awesome.loan_payments enable row level security;
+alter table awesome.savings_plans enable row level security;
+alter table awesome.savings_weeks enable row level security;
+alter table awesome.week_entries  enable row level security;
+alter table awesome.week_expenses enable row level security;
 
 -- Codes are worthless once used or expired, and a table of dead codes is a
 -- table nobody prunes.
@@ -652,6 +969,36 @@ create trigger trg_orgs_touch
   before update on awesome.orgs
   for each row execute function awesome.touch_updated_at();
 
+drop trigger if exists trg_expense_items_touch on awesome.expense_items;
+create trigger trg_expense_items_touch
+  before update on awesome.expense_items
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_loans_touch on awesome.loans;
+create trigger trg_loans_touch
+  before update on awesome.loans
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_savings_plans_touch on awesome.savings_plans;
+create trigger trg_savings_plans_touch
+  before update on awesome.savings_plans
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_savings_weeks_touch on awesome.savings_weeks;
+create trigger trg_savings_weeks_touch
+  before update on awesome.savings_weeks
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_week_entries_touch on awesome.week_entries;
+create trigger trg_week_entries_touch
+  before update on awesome.week_entries
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_week_expenses_touch on awesome.week_expenses;
+create trigger trg_week_expenses_touch
+  before update on awesome.week_expenses
+  for each row execute function awesome.touch_updated_at();
+
 drop trigger if exists trg_invoice_before_write on awesome.invoices;
 create trigger trg_invoice_before_write
   before insert or update on awesome.invoices
@@ -886,6 +1233,24 @@ $$;
 --  business's uuid buys nothing.
 -- ---------------------------------------------------------------------
 
+-- The wall between the two kinds of client. A cash client is never invoiced,
+-- and the application filtering them out of the pickers is not the guarantee:
+-- this is. One function so there is one refusal and one wording, and so a
+-- third caller added later cannot ship without it.
+create or replace function awesome.assert_invoiceable(p_client awesome.clients)
+returns void
+language plpgsql immutable
+set search_path to 'awesome', 'pg_catalog'
+as $$
+begin
+  if p_client.billing_type <> 'invoice' then
+    raise exception
+      '% is a % client and is never invoiced. They are tracked in the savings plan, not in billing. Change them to an invoiced client first if that is what you meant.',
+      p_client.name, p_client.billing_type;
+  end if;
+end;
+$$;
+
 create or replace function awesome.create_invoice(
   p_client_id      uuid,
   p_issuer_id      uuid,
@@ -925,6 +1290,7 @@ begin
   if not found then
     raise exception 'create_invoice: client % not found', p_client_id;
   end if;
+  perform awesome.assert_invoiceable(v_client);
 
   select * into v_issuer from awesome.issuers
    where id = p_issuer_id and org_id = p_org_id;
@@ -1032,6 +1398,7 @@ begin
   if not found then
     raise exception 'update_invoice: client % not found', p_client_id;
   end if;
+  perform awesome.assert_invoiceable(v_client);
 
   select * into v_issuer from awesome.issuers
    where id = p_issuer_id and org_id = p_org_id;

@@ -17,7 +17,7 @@ export default async function EditInvoicePage({
   const org = await orgForPage();
   const [inv, clients, issuers] = await Promise.all([
     getInvoice(org.id, id),
-    listClients(org.id),
+    listClients(org.id, { invoiceable: true }),
     listIssuers(org.id),
   ]);
   if (!inv) notFound();

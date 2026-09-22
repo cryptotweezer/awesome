@@ -1,14 +1,35 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Client, ClientWithIssuer } from "@/lib/types";
+import type {
+  BillingType,
+  Cadence,
+  Client,
+  ClientWithIssuer,
+} from "@/lib/types";
 
-export async function listClients(orgId: string): Promise<ClientWithIssuer[]> {
+/**
+ * Every client of a business, or only the ones it invoices.
+ *
+ * A cash client is never billed and never appears on a document, so anything
+ * that leads to an invoice asks for `invoiceable` and never sees them: the new
+ * invoice form, the edit form, the backup workbook. The savings dashboard and
+ * the client list ask for all of them, because there they are the point.
+ *
+ * This filter is a convenience, not the guarantee. `create_invoice` in Postgres
+ * refuses a cash client outright, which is what makes the rule true for agents
+ * and for any page written after this one.
+ */
+export async function listClients(
+  orgId: string,
+  opts: { invoiceable?: boolean } = {},
+): Promise<ClientWithIssuer[]> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("clients")
     .select("*, issuer:issuers!clients_default_issuer_id_fkey(short_name, abn)")
-    .eq("org_id", orgId)
-    .order("name");
+    .eq("org_id", orgId);
+  if (opts.invoiceable) query = query.eq("billing_type", "invoice");
+  const { data, error } = await query.order("name");
   if (error) throw new Error(`Failed to load clients: ${error.message}`);
   return (data ?? []) as unknown as ClientWithIssuer[];
 }
@@ -23,6 +44,9 @@ export type ClientInput = {
   default_issuer_id: string | null;
   default_description: string | null;
   default_rate: number | null;
+  billing_type?: BillingType;
+  cadence?: Cadence;
+  cadence_weeks?: number | null;
 };
 
 /**
@@ -30,6 +54,22 @@ export type ClientInput = {
  * file a client under somebody else's business. The trial quota is enforced by
  * a trigger in Postgres, which is what makes it apply to agents too.
  */
+/** One client of this business, or null. */
+export async function getClient(
+  orgId: string,
+  id: string,
+): Promise<ClientWithIssuer | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("clients")
+    .select("*, issuer:issuers(short_name, abn)")
+    .eq("org_id", orgId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load the client: ${error.message}`);
+  return (data as ClientWithIssuer | null) ?? null;
+}
+
 export async function createClient(
   orgId: string,
   input: ClientInput,
@@ -50,7 +90,60 @@ export async function createClient(
  * list or by an agent. A client who no longer uses the business is archived,
  * never deleted, so their invoices keep the name they were billed under.
  */
-export type ClientPatch = Partial<ClientInput> & { is_active?: boolean };
+export type ClientPatch = Partial<ClientInput> & {
+  is_active?: boolean;
+  in_week_1?: boolean;
+  in_week_2?: boolean;
+  week_1_day?: number | null;
+  week_2_day?: number | null;
+  week_1_seq?: number | null;
+  week_2_seq?: number | null;
+};
+
+/**
+ * Place a client in one of the two rotation weeks, on a day, or take them out.
+ *
+ * The two weeks are independent: a client done every week is in both, and one
+ * with no rhythm is in neither and gets recorded in whichever week the work
+ * actually happened. So this touches one week and never the other.
+ *
+ * `day` null with `on` true is the real state of a client who belongs to the
+ * week but has not been given a day yet. Removing clears the day as well, so a
+ * client brought back later does not arrive with a day nobody chose.
+ *
+ * Being placed always sends the client to the END of the week's order, which is
+ * what puts them at the bottom of the day they were moved to rather than into
+ * the middle of it carrying a position that meant something somewhere else.
+ */
+export async function setClientRotation(
+  orgId: string,
+  id: string,
+  week: 1 | 2,
+  on: boolean,
+  day: number | null = null,
+): Promise<Client> {
+  const seqColumn = week === 1 ? "week_1_seq" : "week_2_seq";
+
+  let seq: number | null = null;
+  if (on) {
+    const supabase = createAdminClient();
+    const { data: last } = await supabase
+      .from("clients")
+      .select(seqColumn)
+      .eq("org_id", orgId)
+      .eq(week === 1 ? "in_week_1" : "in_week_2", true)
+      .order(seqColumn, { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    seq = (((last as Record<string, number | null> | null)?.[seqColumn] ?? 0) as number) + 1;
+  }
+
+  const patch: ClientPatch =
+    week === 1
+      ? { in_week_1: on, week_1_day: on ? day : null, week_1_seq: seq }
+      : { in_week_2: on, week_2_day: on ? day : null, week_2_seq: seq };
+  return updateClient(orgId, id, patch);
+}
 
 export async function updateClient(
   orgId: string,

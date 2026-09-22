@@ -4,7 +4,7 @@ import {
   unauthorizedHeaders,
   type Agent,
 } from "@/lib/gateway/auth";
-import { tools } from "@/lib/gateway/tools";
+import { registryFor } from "@/lib/gateway/tools";
 import { runTool } from "@/lib/gateway/dispatch";
 import { appBaseUrl } from "@/lib/app-url";
 import { protectGateway } from "@/lib/security/arcjet";
@@ -94,24 +94,29 @@ async function handle(msg: Incoming, agent: Agent): Promise<object | null> {
       case "ping":
         return ok(id, {});
 
-      case "tools/list":
+      case "tools/list": {
+        // Built per caller rather than read from the module: what a business
+        // can run depends on which business it is.
+        const registry = await registryFor(agent.orgId);
         return ok(id, {
-          tools: Object.entries(tools).map(([name, def]) => ({
+          tools: Object.entries(registry).map(([name, def]) => ({
             name,
             description: def.description,
             inputSchema: def.schema ?? { type: "object", additionalProperties: true },
           })),
         });
+      }
 
       case "tools/call": {
         const name = typeof params.name === "string" ? params.name : "";
-        if (!tools[name]) return err(id, -32602, `Unknown tool "${name}"`);
+        const registry = await registryFor(agent.orgId);
+        if (!registry[name]) return err(id, -32602, `Unknown tool "${name}"`);
 
         // The scope gate, the retry guard and the log all live in the one
         // dispatcher both transports share, so a tool can never be the one
         // that forgot. Here that leaves only the wire shape.
         const args = (params.arguments ?? {}) as Record<string, unknown>;
-        const outcome = await runTool(name, args, agent);
+        const outcome = await runTool(name, args, agent, { registry });
         if (!outcome.ok) {
           // A refusal is a result with isError, not a protocol error: the
           // model has to be able to read it and tell the person.

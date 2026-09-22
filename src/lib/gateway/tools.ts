@@ -86,6 +86,26 @@ export type ToolDef = {
 };
 
 /**
+ * The tools one business can actually call.
+ *
+ * Everything in `tools` is part of the billing app, so every business gets it.
+ * The savings plan is Awesome's alone, and its tools are added only for Awesome:
+ * a guest offered a tool it cannot use is worse off than one never told about
+ * it, because an agent reading a tool list will try what is on it.
+ *
+ * Both transports and the dashboard assistant build their registry from here,
+ * so there is one answer to "what can this caller run" rather than three.
+ */
+export async function registryFor(
+  orgId: string,
+): Promise<Record<string, ToolDef>> {
+  const { hasSavings, savingsTools } = await import(
+    "@/lib/gateway/savings-tools"
+  );
+  return hasSavings(orgId) ? { ...tools, ...savingsTools } : tools;
+}
+
+/**
  * The single gate both transports call before running anything. Returns the
  * missing scope, or null when the caller may proceed.
  */
@@ -624,7 +644,11 @@ export const tools: Record<string, ToolDef> = {
     scope: "read",
     description:
       "All clients with their details (incl. internal email). is_active:false means archived: " +
-      "they still exist and keep their history, but the business is no longer invoicing them.",
+      "they still exist and keep their history, but the business is no longer invoicing them. " +
+      "billing_type says what kind of client they are, and only one of the three can be " +
+      'invoiced: "invoice" (a document is issued, money into the account), "transfer" (money ' +
+      'into the account, NEVER invoiced) and "cash" (paid in person, NEVER invoiced). Raising ' +
+      "an invoice for a transfer or cash client is refused. cadence says how often they are done.",
     schema: NO_ARGS,
     handler: (_input, ctx) => listClients(ctx.agent.orgId),
   },

@@ -56,7 +56,16 @@ export async function createBackupWorkbook(
   wb.created = new Date();
   addSheet(wb, "Invoices", backup.invoices as Row[]);
   addSheet(wb, "Line Items", backup.invoice_items as Row[]);
-  addSheet(wb, "Clients", backup.clients as Row[]);
+  // This workbook goes to the accountant, so it holds the billed side of the
+  // business and nothing else. A client who is never invoiced, whether they pay
+  // cash or transfer without a document, has no place in a tax conversation.
+  // They stay in the JSON backup, which is the complete copy and the one a
+  // restore reads.
+  addSheet(
+    wb,
+    "Clients",
+    (backup.clients as Row[]).filter((c) => c.billing_type === "invoice"),
+  );
   addSheet(wb, "ABNs", backup.issuers as Row[]);
   addSheet(wb, "Business", [backup.org as Row]);
 
