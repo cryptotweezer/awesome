@@ -54,9 +54,10 @@ import {
   recordVaultMovement,
   vaultStatus,
 } from "@/lib/data/vault";
-import { taxYear } from "@/lib/data/tax";
+import { deleteDeduction, saveDeduction, taxYear } from "@/lib/data/tax";
 import { todayInSydney } from "@/lib/format";
 import {
+  DEDUCTION_CATEGORIES,
   WEEKDAYS,
   isLongerCycle,
   methodFor,
@@ -67,6 +68,7 @@ import {
 import type { ToolDef, ToolInput } from "@/lib/gateway/tools";
 import type {
   BillingType,
+  DeductionCategory,
   Cadence,
   ExpenseCategory,
   ExpenseItem,
@@ -256,6 +258,45 @@ async function loanFor(
   if (matches.length > 1) {
     throw new Error(
       `"${name}" matches ${matches.length}: ${matches.map((m) => m.name).join(", ")}`,
+    );
+  }
+  return matches[0];
+}
+
+/**
+ * Whose ABN is meant, by short name or by id.
+ *
+ * By name because that is how it is said out loud ("Mavi's ABN"), and there are
+ * two of them. With one ABN and nothing named, that one is meant.
+ */
+async function issuerFor(
+  year: Awaited<ReturnType<typeof taxYear>>,
+  input: ToolInput,
+) {
+  const id = str(input, "issuer_id");
+  if (id) {
+    const found = year.issuers.find((i) => i.id === id);
+    if (!found) throw new Error("No such ABN");
+    return found;
+  }
+  const name = str(input, "abn");
+  if (!name) {
+    if (year.issuers.length === 1) return year.issuers[0];
+    throw new Error(
+      `Whose ABN? ${year.issuers.map((i) => i.short_name).join(" or ")}`,
+    );
+  }
+  const needle = name.toLowerCase();
+  const matches = year.issuers.filter(
+    (i) =>
+      i.short_name.toLowerCase().includes(needle) ||
+      i.full_name.toLowerCase().includes(needle) ||
+      i.abn === name.replace(/\s/g, ""),
+  );
+  if (matches.length === 0) throw new Error(`No ABN matching "${name}"`);
+  if (matches.length > 1) {
+    throw new Error(
+      `"${name}" matches ${matches.map((m) => m.short_name).join(", ")}`,
     );
   }
   return matches[0];
@@ -1844,6 +1885,8 @@ export const savingsTools: Record<string, ToolDef> = {
           billed: i.billed,
           paid: i.paid,
           income_for_tax: i.income,
+          expenses_to_claim: i.deducted,
+          left_after_expenses: i.taxable,
           room_left: i.room,
           over_by: i.over,
           percent_of_threshold: i.percent,
@@ -1855,6 +1898,154 @@ export const savingsTools: Record<string, ToolDef> = {
           "The threshold is per person and covers their whole income, not just what this " +
           "business billed. Room left is only the part still billable here.",
       };
+    },
+  },
+
+  tax_expenses: {
+    scope: "read",
+    description:
+      "What one ABN is claiming against a financial year: every expense recorded for it, with " +
+      "the day it was spent, what it was, its kind and the amount. These are the accountant's " +
+      "deductions and they are NOT the weekly costs of the savings plan: a weekly cost belongs " +
+      "to a week and to the household, one of these belongs to a date and to the person who " +
+      "claims it. Args: abn (the name, Mavi or Andres), fy_start (optional).",
+    schema: obj({
+      abn: { type: "string", description: "Whose ABN: the short name." },
+      issuer_id: { type: "string" },
+      fy_start: DATE,
+    }),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const org = await getOrg(orgId);
+      if (!org) throw new Error("Business not found");
+      const year = await taxYear(org, str(input, "fy_start") ?? undefined);
+      const issuer = await issuerFor(year, input);
+      return {
+        abn_holder: issuer.short_name,
+        abn: issuer.abn,
+        financial_year: year.fy_label,
+        from: year.fy_start,
+        to: year.fy_end,
+        total_to_claim: issuer.deducted,
+        income_for_tax: issuer.income,
+        left_after_expenses: issuer.taxable,
+        expenses: issuer.deductions.map((d) => ({
+          id: d.id,
+          on: d.spent_on,
+          what: d.description,
+          kind: d.category,
+          amount: d.amount,
+          note: d.note,
+          by: d.recorded_by,
+        })),
+      };
+    },
+  },
+
+  record_tax_expense: {
+    scope: "write",
+    idempotent: true,
+    description:
+      "Record something the accountant will take off one ABN: fuel, tools, insurance, fees. " +
+      "It belongs to the PERSON who will claim it, so the ABN is required, and a cost shared " +
+      "between the two is recorded twice, split, because that is what each of them claims. " +
+      "`on` is the day the money was SPENT, which is what puts it in a financial year. " +
+      "`kind` is one of: " + DEDUCTION_CATEGORIES.map((c) => c.value).join(", ") + ". " +
+      "This is not a weekly cost: those belong to a week and to the household, and go through " +
+      "set_week_cost or set_weekly_expense instead. Nothing here touches a week, the vault or " +
+      "what a week saved; it appears on that ABN's tax statement and nowhere else. " +
+      "Args: abn (required), what (required), amount (required), on, kind, note, expense_id " +
+      "(to correct one).",
+    schema: obj(
+      {
+        abn: { type: "string", description: "Whose ABN: the short name." },
+        issuer_id: { type: "string" },
+        what: { type: "string", description: "What was bought or paid for." },
+        amount: { type: "number" },
+        on: { ...DATE, description: "The day it was spent. Defaults to today." },
+        kind: {
+          type: "string",
+          enum: DEDUCTION_CATEGORIES.map((c) => c.value),
+        },
+        note: { type: "string" },
+        expense_id: { type: "string" },
+        idempotency_key: { type: "string" },
+      },
+      ["what", "amount"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const org = await getOrg(orgId);
+      if (!org) throw new Error("Business not found");
+
+      const amount = num(input, "amount");
+      if (amount === null || amount <= 0) {
+        throw new Error("The amount must be more than 0");
+      }
+      const kind = (str(input, "kind") ?? "other").toLowerCase();
+      if (!DEDUCTION_CATEGORIES.some((c) => c.value === kind)) {
+        throw new Error(
+          `kind is one of: ${DEDUCTION_CATEGORIES.map((c) => c.value).join(", ")}`,
+        );
+      }
+
+      const year = await taxYear(org);
+      const issuer = await issuerFor(year, input);
+
+      // Correcting one keeps what was not mentioned. A day and a kind the
+      // caller did not send are not "unknown", they are already recorded, and
+      // an update that quietly reset them to today and "other" would lose the
+      // one thing this table is for.
+      const existingId = str(input, "expense_id");
+      const existing = existingId
+        ? year.issuers
+            .flatMap((i) => i.deductions)
+            .find((d) => d.id === existingId)
+        : undefined;
+      if (existingId && !existing) {
+        throw new Error("No such expense in this financial year");
+      }
+
+      const saved = await saveDeduction(
+        orgId,
+        {
+          issuer_id: issuer.id,
+          spent_on:
+            str(input, "on") ?? existing?.spent_on ?? todayInSydney(),
+          amount,
+          category: (str(input, "kind")
+            ? kind
+            : (existing?.category ?? kind)) as DeductionCategory,
+          description: need(input, "what"),
+          note: str(input, "note") ?? existing?.note ?? null,
+          recorded_by: ctx.agent.label,
+        },
+        existingId ?? undefined,
+      );
+
+      const after = await taxYear(org);
+      const mine = after.issuers.find((i) => i.id === issuer.id);
+      return {
+        recorded: saved.description,
+        amount: saved.amount,
+        kind: saved.category,
+        on: saved.spent_on,
+        against: issuer.short_name,
+        total_to_claim_this_year: mine?.deducted,
+        left_after_expenses: mine?.taxable,
+      };
+    },
+  },
+
+  delete_tax_expense: {
+    scope: "delete",
+    description:
+      "Remove an expense recorded against an ABN, for one entered wrongly. Nothing is derived " +
+      "from it, so it simply goes. Get the id from tax_expenses. Args: expense_id.",
+    schema: obj({ expense_id: { type: "string" } }, ["expense_id"]),
+    handler: async (input, ctx) => {
+      await deleteDeduction(ctx.agent.orgId, need(input, "expense_id"));
+      return { deleted: true };
     },
   },
 };

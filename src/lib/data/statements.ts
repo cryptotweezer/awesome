@@ -6,7 +6,14 @@ import {
   financialYearEnd,
   financialYearLabel,
 } from "@/lib/data/invoices";
-import type { Client, InvoiceStatus, Issuer, Org } from "@/lib/types";
+import { listDeductions } from "@/lib/data/tax";
+import type {
+  Client,
+  InvoiceStatus,
+  Issuer,
+  Org,
+  TaxDeduction,
+} from "@/lib/types";
 
 /**
  * Statements are DERIVED documents — computed on the fly from live invoice
@@ -227,6 +234,13 @@ export type FyStatement = {
   invoiceCount: number;
   cancelledCount: number;
   total: number;
+  /**
+   * What this ABN claims against that year: the other half of what the
+   * accountant needs, and the reason this document is worth one email instead
+   * of two. Empty when nothing has been recorded.
+   */
+  deductions: TaxDeduction[];
+  deducted: number;
 };
 
 /**
@@ -272,7 +286,7 @@ export async function getFyStatement(
   const supabase = createAdminClient();
   const fyEnd = financialYearEnd(fyStart);
 
-  const [{ data: issuer }, { data: rows, error }] = await Promise.all([
+  const [{ data: issuer }, { data: rows, error }, claims] = await Promise.all([
     supabase
       .from("issuers")
       .select("*")
@@ -289,6 +303,7 @@ export async function getFyStatement(
       .gte("invoice_date", fyStart)
       .lte("invoice_date", fyEnd)
       .order("invoice_number", { ascending: true }),
+    listDeductions(org.id, issuerId, fyStart, fyEnd),
   ]);
   if (error) throw new Error(`Failed to load statement: ${error.message}`);
   if (!issuer) return null;
@@ -350,5 +365,8 @@ export async function getFyStatement(
     invoiceCount,
     cancelledCount,
     total,
+    deductions: claims,
+    deducted:
+      Math.round(claims.reduce((sum, d) => sum + d.amount, 0) * 100) / 100,
   };
 }

@@ -1,6 +1,7 @@
 import type {
   BillingType,
   Client,
+  DeductionCategory,
   ExpenseCategory,
   ExpenseItem,
   PaymentMethod,
@@ -20,6 +21,32 @@ export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
   { value: "colombia", label: "Colombia" },
   { value: "visa", label: "Visa" },
 ];
+
+/**
+ * The kinds of tax deduction, in the order they are offered.
+ *
+ * Shared between the form, the list, the PDF and the agent's tool, so the words
+ * a person picks are the words the accountant reads.
+ */
+export const DEDUCTION_CATEGORIES: {
+  value: DeductionCategory;
+  label: string;
+}[] = [
+  { value: "vehicle", label: "Vehicle" },
+  { value: "tools", label: "Tools" },
+  { value: "equipment", label: "Equipment" },
+  { value: "supplies", label: "Supplies" },
+  { value: "phone_internet", label: "Phone and internet" },
+  { value: "insurance", label: "Insurance" },
+  { value: "fees", label: "Fees" },
+  { value: "travel", label: "Travel" },
+  { value: "clothing", label: "Clothing" },
+  { value: "other", label: "Other" },
+];
+
+export function deductionLabel(value: DeductionCategory | string): string {
+  return DEDUCTION_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
 
 export function categoryLabel(value: ExpenseCategory): string {
   return EXPENSE_CATEGORIES.find((c) => c.value === value)?.label ?? value;

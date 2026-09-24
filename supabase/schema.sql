@@ -822,6 +822,61 @@ create table if not exists awesome.deleted_plans (
 create index if not exists deleted_plans_org_idx
   on awesome.deleted_plans (org_id, deleted_at desc);
 
+-- What the accountant takes off, per ABN.
+--
+-- The invoices say what came IN under each ABN; this is the other half of a tax
+-- year. It must never be confused with a weekly cost:
+--
+--   expense_items / week_expenses  the household's and the business's running
+--                                  costs, which the savings plan lives on. They
+--                                  belong to a WEEK, never to an ABN, and no
+--                                  accountant sees them.
+--   tax_deductions (this table)    what one PERSON claims against one ABN in a
+--                                  financial year. It belongs to a DATE and an
+--                                  ABN, never touches a week, the vault or what
+--                                  a week saved, and prints on that ABN's tax
+--                                  statement.
+--
+-- Some real costs are both, and that is fine: the same fuel can be a weekly cost
+-- on the savings side and a claim here. Two questions asked of the same money,
+-- so two rows, and neither is derived from the other.
+--
+-- `issuer_id` is required on purpose: a deduction belongs to the person who will
+-- claim it, and a cost shared between two people is entered twice, split.
+create table if not exists awesome.tax_deductions (
+  id          uuid          not null default gen_random_uuid(),
+  org_id      uuid          not null,
+  issuer_id   uuid          not null,
+  -- The day the money was spent, which is what puts it in a financial year.
+  spent_on    date          not null,
+  amount      numeric(12,2) not null,
+  -- A short fixed list, so a year can be grouped and an agent cannot invent a
+  -- new kind every time. `other` plus the description is the escape hatch.
+  category    text          not null default 'other',
+  description text          not null,
+  note        text,
+  recorded_by text,
+  created_at  timestamptz   not null default now(),
+  updated_at  timestamptz   not null default now(),
+  constraint tax_deductions_pkey primary key (id),
+  constraint tax_deductions_amount_positive check (amount > 0),
+  constraint tax_deductions_description_not_blank
+    check (btrim(description) <> ''),
+  constraint tax_deductions_category_check check (category in (
+    'vehicle', 'tools', 'equipment', 'supplies', 'phone_internet',
+    'insurance', 'fees', 'travel', 'clothing', 'other'
+  )),
+  constraint tax_deductions_issuer_fkey foreign key (issuer_id)
+    references awesome.issuers(id) on delete cascade,
+  constraint tax_deductions_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+create index if not exists tax_deductions_org_idx
+  on awesome.tax_deductions (org_id, spent_on desc);
+create index if not exists tax_deductions_issuer_idx
+  on awesome.tax_deductions (issuer_id, spent_on desc);
+
 -- ---------------------------------------------------------------------
 --  Access. RLS on, no policies: service_role only, from the server only.
 -- ---------------------------------------------------------------------
@@ -846,6 +901,7 @@ alter table awesome.week_entries  enable row level security;
 alter table awesome.week_expenses enable row level security;
 alter table awesome.vault_movements enable row level security;
 alter table awesome.deleted_plans enable row level security;
+alter table awesome.tax_deductions enable row level security;
 
 -- The undo window on a deleted plan, closed. Called every day by the same cron
 -- that trims the agent log; thirty days is long enough to notice a mistake and
@@ -1145,6 +1201,11 @@ create trigger trg_week_expenses_touch
 drop trigger if exists trg_vault_movements_touch on awesome.vault_movements;
 create trigger trg_vault_movements_touch
   before update on awesome.vault_movements
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_tax_deductions_touch on awesome.tax_deductions;
+create trigger trg_tax_deductions_touch
+  before update on awesome.tax_deductions
   for each row execute function awesome.touch_updated_at();
 
 drop trigger if exists trg_invoice_before_write on awesome.invoices;

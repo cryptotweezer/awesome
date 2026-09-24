@@ -550,6 +550,45 @@ export interface VaultEntry {
   loan_id: string | null;
 }
 
+/**
+ * The kinds of claim a deduction can be, kept short and fixed so a year can be
+ * grouped and an agent cannot invent a new one each time. `other` plus the
+ * description is the escape hatch.
+ */
+export type DeductionCategory =
+  | "vehicle"
+  | "tools"
+  | "equipment"
+  | "supplies"
+  | "phone_internet"
+  | "insurance"
+  | "fees"
+  | "travel"
+  | "clothing"
+  | "other";
+
+/**
+ * What the accountant takes off, for ONE ABN in one financial year.
+ *
+ * Not a weekly cost and never to be confused with one: an `expense_item`
+ * belongs to a week and to the household, this belongs to a date and to the
+ * person who claims it. The same fuel can be both, as two rows, because they
+ * are two different questions asked of the same money.
+ */
+export interface TaxDeduction {
+  id: string;
+  org_id: string;
+  issuer_id: string;
+  spent_on: string;
+  amount: number;
+  category: DeductionCategory;
+  description: string;
+  note: string | null;
+  recorded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentKey {
   id: string;
   org_id: string;

@@ -4,6 +4,7 @@ import type { CompanyProfile } from "@/lib/types";
 import type { Logo } from "./logo";
 import type { FyStatement } from "@/lib/data/statements";
 import { formatDate } from "@/lib/format";
+import { deductionLabel } from "@/lib/savings";
 import {
   INK,
   MUTED,
@@ -67,6 +68,17 @@ const s = StyleSheet.create({
   totalLabel: { fontFamily: "Helvetica-Bold", marginRight: 16 },
   totalValue: { fontFamily: "Helvetica-Bold", width: 80, textAlign: "right" },
   note: { marginTop: 8, fontSize: 8, color: MUTED },
+
+  // The claims, when there are any. Same table, narrower: a day, what it was,
+  // its kind and the amount.
+  sectionTitle: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 10,
+    marginTop: 26,
+  },
+  colDay: { width: 58 },
+  colWhat: { flex: 1, paddingRight: 6 },
+  colKind: { width: 92 },
 });
 
 export function FyStatementDocument({
@@ -187,6 +199,47 @@ export function FyStatementDocument({
             listed above to explain the gap in the invoice numbering, and are
             excluded from the total.
           </Text>
+        )}
+
+        {/* What this ABN claims against the year. It is on the same document as
+            the income on purpose: the accountant is being asked one question,
+            not two, and two attachments is how one of them gets lost. */}
+        {statement.deductions.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Expenses to claim</Text>
+            <View style={s.table}>
+              <View style={s.th}>
+                <Text style={[s.thText, s.colDay]}>Date</Text>
+                <Text style={[s.thText, s.colWhat]}>What</Text>
+                <Text style={[s.thText, s.colKind]}>Kind</Text>
+                <Text style={[s.thText, s.colTotal]}>Amount</Text>
+              </View>
+              {statement.deductions.map((d) => (
+                <View key={d.id} style={s.tr} wrap={false}>
+                  <Text style={s.colDay}>{formatDate(d.spent_on)}</Text>
+                  <Text style={s.colWhat}>
+                    {d.description}
+                    {d.note ? ` (${d.note})` : ""}
+                  </Text>
+                  <Text style={[s.colKind, s.muted]}>
+                    {deductionLabel(d.category)}
+                  </Text>
+                  <Text style={s.colTotal}>{money(d.amount)}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={s.totalRow}>
+              <Text style={s.totalLabel}>TOTAL EXPENSES {statement.fyLabel}</Text>
+              <Text style={s.totalValue}>{money(statement.deducted)}</Text>
+            </View>
+
+            <Text style={s.note}>
+              Recorded by the business against this {taxIdLabel} for this
+              financial year, with the date each amount was spent. What is
+              claimable is the accountant&apos;s call, not this document&apos;s.
+            </Text>
+          </>
         )}
 
         <PageNumber />

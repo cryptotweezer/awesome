@@ -48,6 +48,7 @@ export type Backup = {
     loans: unknown[];
     loan_payments: unknown[];
     vault_movements: unknown[];
+    tax_deductions: unknown[];
   };
   counts: Record<string, number>;
 };
@@ -131,6 +132,7 @@ async function savingsSections(orgId: string) {
     loans,
     loanPayments,
     vault,
+    deductions,
   ] = await Promise.all([
     table("savings_plans", "starts_on"),
     table("savings_weeks", "week_start"),
@@ -140,6 +142,7 @@ async function savingsSections(orgId: string) {
     table("loans", "name"),
     table("loan_payments", "paid_on"),
     table("vault_movements", "occurred_on"),
+    table("tax_deductions", "spent_on"),
   ]);
 
   const all = {
@@ -151,6 +154,7 @@ async function savingsSections(orgId: string) {
     loans,
     loan_payments: loanPayments,
     vault_movements: vault,
+    tax_deductions: deductions,
   };
   for (const [name, r] of Object.entries(all)) {
     if (r.error) throw new Error(`Backup failed on ${name}: ${r.error.message}`);
@@ -166,6 +170,7 @@ async function savingsSections(orgId: string) {
       loans: loans.data ?? [],
       loan_payments: loanPayments.data ?? [],
       vault_movements: vault.data ?? [],
+      tax_deductions: deductions.data ?? [],
     },
     counts: Object.fromEntries(
       Object.entries(all).map(([name, r]) => [name, r.data?.length ?? 0]),

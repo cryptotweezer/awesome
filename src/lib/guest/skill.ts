@@ -132,6 +132,12 @@ was sent to Colombia and is frozen. Both in AUD.
   When you answer, say that the threshold covers that person's whole income:
   another job or anything invoiced elsewhere counts towards it and is not in
   this app, so the room shown is only the part still billable here.
+- \`tax_expenses\` and \`record_tax_expense\`: what the accountant will take
+  off ONE ABN, with the day it was spent. These are not the weekly costs: a
+  weekly cost belongs to a week and to the household, one of these belongs to a
+  date and to the person claiming it, and the two are recorded separately even
+  when it is the same fuel. A cost shared between Mavi and Andres is recorded
+  twice, split. \`delete_tax_expense\` for one entered wrongly.
 - \`send_to_vault_col\`: a transfer the owner made on Wise. Record the rate of
   the day or the pesos that arrived; the other is worked out.
 - \`record_vault_withdrawal\`: the saving being spent, with its reason. Ask what

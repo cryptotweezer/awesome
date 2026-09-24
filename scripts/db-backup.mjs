@@ -49,6 +49,8 @@ const TABLES = [
   "loans",
   "loan_payments",
   "vault_movements",
+  // Per-ABN deductions: the other half of a tax year.
+  "tax_deductions",
   // The thirty-day bin, included because a snapshot taken while something is in
   // it should be able to give it back.
   "deleted_plans",

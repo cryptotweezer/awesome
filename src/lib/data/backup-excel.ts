@@ -82,6 +82,7 @@ export async function createBackupWorkbook(
     addSheet(wb, "Loans", s.loans as Row[]);
     addSheet(wb, "Loan Payments", s.loan_payments as Row[]);
     addSheet(wb, "Vault", s.vault_movements as Row[]);
+    addSheet(wb, "Tax Expenses", s.tax_deductions as Row[]);
   }
 
   const buffer = await wb.xlsx.writeBuffer();
