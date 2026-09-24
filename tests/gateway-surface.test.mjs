@@ -81,6 +81,7 @@ const SAVINGS_TOOLS = [
   "weekly_expenses",
   "loans_status",
   "vault_status",
+  "tax_position",
   // A week as it happens
   "mark_service",
   "record_week_payment",

@@ -4,7 +4,7 @@ import {
   setClientRotation,
   updateClient,
 } from "@/lib/data/clients";
-import { AWESOME_ORG_ID } from "@/lib/data/org";
+import { AWESOME_ORG_ID, getOrg } from "@/lib/data/org";
 import {
   createExpenseItem,
   deleteExpenseItem,
@@ -54,6 +54,7 @@ import {
   recordVaultMovement,
   vaultStatus,
 } from "@/lib/data/vault";
+import { taxYear } from "@/lib/data/tax";
 import { todayInSydney } from "@/lib/format";
 import {
   WEEKDAYS,
@@ -1804,6 +1805,56 @@ export const savingsTools: Record<string, ToolDef> = {
       const orgId = ctx.agent.orgId;
       await deleteWeekExpense(orgId, need(input, "cost_id"));
       return { deleted: true };
+    },
+  },
+
+  tax_position: {
+    scope: "read",
+    description:
+      "How much each ABN has billed this financial year and how much room is left before that " +
+      "person is taxed. PER PERSON, never added together: each ABN belongs to somebody and " +
+      "each of them has their own tax-free threshold. " +
+      "An invoice counts in the year of its invoice date, a cancelled one does not count at " +
+      "all, and GST is taken out where there is any, because GST collected was never income. " +
+      "IMPORTANT when answering: the threshold is on that person's WHOLE income for the year, " +
+      "so a wage from another job or anything invoiced outside this business counts towards " +
+      "the same figure and is not in here. Say that rather than telling the owner they have " +
+      "room they may not have. Args: fy_start (optional, to read an earlier year).",
+    schema: obj({
+      fy_start: {
+        ...DATE,
+        description:
+          "The first day of the financial year to read. Defaults to the one running now.",
+      },
+    }),
+    handler: async (input, ctx) => {
+      const org = await getOrg(ctx.agent.orgId);
+      if (!org) throw new Error("Business not found");
+      const year = await taxYear(org, str(input, "fy_start") ?? undefined);
+      return {
+        financial_year: year.fy_label,
+        from: year.fy_start,
+        to: year.fy_end,
+        tax_free_threshold: year.threshold,
+        per_abn: year.issuers.map((i) => ({
+          who: i.short_name,
+          name: i.full_name,
+          abn: i.abn,
+          invoices: i.invoices,
+          billed: i.billed,
+          paid: i.paid,
+          income_for_tax: i.income,
+          room_left: i.room,
+          over_by: i.over,
+          percent_of_threshold: i.percent,
+          ...(i.is_active ? {} : { archived: true }),
+        })),
+        business_total_billed: year.billed,
+        business_total_paid: year.paid,
+        note:
+          "The threshold is per person and covers their whole income, not just what this " +
+          "business billed. Room left is only the part still billable here.",
+      };
     },
   },
 };

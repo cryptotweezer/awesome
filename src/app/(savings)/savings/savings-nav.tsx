@@ -21,6 +21,7 @@ const SECTIONS: { href: string; label: string; ready: boolean }[] = [
   { href: "/savings/loans", label: "Loans", ready: true },
   { href: "/savings/plan", label: "Plan", ready: true },
   { href: "/savings/vault", label: "Vault", ready: true },
+  { href: "/savings/tax", label: "Tax", ready: true },
 ];
 
 /**

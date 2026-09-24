@@ -127,6 +127,11 @@ was sent to Colombia and is frozen. Both in AUD.
 
 - \`vault_status\`: the two balances and where they came from. Read this for any
   question about what has been saved, never add the weeks up yourself.
+- \`tax_position\`: what each ABN has billed this financial year and how much
+  room is left under the tax-free threshold. Per person, never added together.
+  When you answer, say that the threshold covers that person's whole income:
+  another job or anything invoiced elsewhere counts towards it and is not in
+  this app, so the room shown is only the part still billable here.
 - \`send_to_vault_col\`: a transfer the owner made on Wise. Record the rate of
   the day or the pesos that arrived; the other is worked out.
 - \`record_vault_withdrawal\`: the saving being spent, with its reason. Ask what
