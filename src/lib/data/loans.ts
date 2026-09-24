@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Loan, LoanPayment, LoanWithBalance } from "@/lib/types";
+import { vaultStatus } from "@/lib/data/vault";
+import type { Loan, LoanPayment, LoanWithBalance, VaultName } from "@/lib/types";
 
 /**
  * Loans, and what is left of them.
@@ -176,6 +177,11 @@ export async function deleteLoan(orgId: string, id: string): Promise<void> {
 export type LoanPaymentInput = {
   loan_id: string;
   amount: number;
+  /**
+   * Which vault the money came out of, or null for the ordinary case: paid out
+   * of the week's money, with the saving untouched.
+   */
+  from_vault: VaultName | null;
   paid_on: string;
   note: string | null;
   recorded_by: string | null;
@@ -197,6 +203,20 @@ export async function recordLoanPayment(
     .eq("id", input.loan_id)
     .maybeSingle();
   if (!loan) throw new Error(`Loan ${input.loan_id} not found`);
+
+  // Paying a loan out of the saving is allowed, paying it out of a saving that
+  // is not there is a typo. The vault's balance is the closed weeks minus what
+  // has left them, and this payment is about to be part of what has left.
+  if (input.from_vault) {
+    const status = await vaultStatus(orgId);
+    const available = input.from_vault === "col" ? status.col : status.aus;
+    if (input.amount > available + 0.005) {
+      throw new Error(
+        `Vault ${input.from_vault.toUpperCase()} holds ${available.toFixed(2)}, ` +
+          `which is less than ${input.amount.toFixed(2)}.`,
+      );
+    }
+  }
 
   const { data, error } = await supabase
     .from("loan_payments")

@@ -69,6 +69,21 @@ export async function createBackupWorkbook(
   addSheet(wb, "ABNs", backup.issuers as Row[]);
   addSheet(wb, "Business", [backup.org as Row]);
 
+  // The savings half, for the business that has one. These sheets are the
+  // household's own money and never go to an accountant, but this workbook is
+  // also the copy he keeps, and a backup that holds half of it is not a backup.
+  if (backup.savings) {
+    const s = backup.savings;
+    addSheet(wb, "Savings Plans", s.plans as Row[]);
+    addSheet(wb, "Savings Weeks", s.weeks as Row[]);
+    addSheet(wb, "Week Work", s.week_entries as Row[]);
+    addSheet(wb, "Week Costs", s.week_expenses as Row[]);
+    addSheet(wb, "Fixed Costs", s.expense_items as Row[]);
+    addSheet(wb, "Loans", s.loans as Row[]);
+    addSheet(wb, "Loan Payments", s.loan_payments as Row[]);
+    addSheet(wb, "Vault", s.vault_movements as Row[]);
+  }
+
   const buffer = await wb.xlsx.writeBuffer();
   return {
     filename: `awesome-backup-${backup.meta.date}.xlsx`,

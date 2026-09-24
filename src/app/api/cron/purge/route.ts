@@ -120,6 +120,12 @@ export async function GET(request: Request) {
     p_days: 30,
   });
 
+  // The plan bin: a deleted plan is kept for thirty days so a mis-click can be
+  // undone, and this is what closes that window.
+  const { data: bin } = await supabase.rpc("purge_deleted_plans", {
+    p_days: 30,
+  });
+
   return NextResponse.json({
     swept: sweeping,
     purged: purged.length,
@@ -128,6 +134,7 @@ export async function GET(request: Request) {
     agent_calls_capped: trimmed?.capped_calls ?? 0,
     agent_calls_kept_per_org: keep,
     agent_writes_removed: trimmed?.purged_writes ?? 0,
+    deleted_plans_removed: bin ?? 0,
     oauth_codes_removed: codes ?? 0,
     oauth_clients_removed: clients ?? 0,
     ...(historyError ? { agent_history_error: historyError.message } : {}),

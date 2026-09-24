@@ -42,7 +42,7 @@ export function NavLinks({
     : LINKS;
 
   return (
-    <nav className="flex items-center gap-1">
+    <nav className="-mx-1 flex items-center gap-1 overflow-x-auto px-1">
       {links.map((link) => {
         const active =
           !disabled &&
@@ -55,7 +55,7 @@ export function NavLinks({
               data-tour={link.tour}
               aria-disabled="true"
               title="Create your business first"
-              className="cursor-not-allowed rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 dark:text-slate-600"
+              className="shrink-0 cursor-not-allowed rounded-lg px-3 py-1.5 text-sm font-medium text-slate-400 dark:text-slate-600"
             >
               {link.label}
             </span>
@@ -67,7 +67,7 @@ export function NavLinks({
             key={link.href}
             href={link.href}
             data-tour={link.tour}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
               active
                 ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
                 : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"

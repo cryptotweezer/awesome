@@ -2,9 +2,10 @@
 //
 //   node --env-file=.env.local scripts/db-backup.mjs [outDir]
 //
-// Same shape as /backup/download, but runnable without a browser session, which
-// is what a migration needs. `agent_keys` rows are included WITHOUT their
-// hashes so the file is a safety net and not a set of credentials.
+// Runnable without a browser session, which is what a migration needs, and
+// wider than the dashboard button: every table of the schema rather than one
+// organisation's. `agent_keys` rows are included WITHOUT their hashes so the
+// file is a safety net and not a set of credentials.
 import { createClient } from "@supabase/supabase-js";
 import { writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -22,13 +23,35 @@ const db = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+// Every table in the schema that holds data worth keeping, billing and savings
+// alike. Two are left out on purpose: `oauth_codes`, which are single-use and
+// expire in sixty seconds, and `oauth_tokens`, which hold hashed credentials and
+// have no business in a file on disk. `agent_keys` comes WITHOUT its hashes,
+// below, for the same reason.
 const TABLES = [
-  "company_profile",
+  "orgs",
+  "org_members",
   "issuers",
   "clients",
   "invoices",
   "invoice_items",
   "agent_keys",
+  "oauth_clients",
+  "agent_calls",
+  "agent_writes",
+  // The savings half. Only organisation #1 has any of this; for anybody else
+  // these come back empty, which is the honest answer.
+  "savings_plans",
+  "savings_weeks",
+  "week_entries",
+  "week_expenses",
+  "expense_items",
+  "loans",
+  "loan_payments",
+  "vault_movements",
+  // The thirty-day bin, included because a snapshot taken while something is in
+  // it should be able to give it back.
+  "deleted_plans",
 ];
 
 // Defaults to a sibling of the repo, so backups never land inside a folder

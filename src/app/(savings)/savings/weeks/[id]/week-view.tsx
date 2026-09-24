@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useEffect, useRef, useState } from "react";
 import {
   WEEKDAYS,
+  appliesToWeek,
   aud,
   methodFor,
   serviceDateFor,
@@ -127,10 +128,12 @@ export function WeekView({
         <section className="space-y-4">
           <Expenses
             weekId={week.id}
+            weekEnd={week.week_end}
             closed={closed}
             standing={standing}
             recorded={expenses}
             total={detail.expenses_total}
+            detail={detail}
           />
           <Notes weekId={week.id} notes={week.notes} />
         </section>
@@ -143,7 +146,10 @@ export function WeekView({
 
 function Header({ detail, today }: { detail: WeekDetail; today: string }) {
   const { week, state } = detail;
-  const met = detail.surplus >= detail.target;
+  const closed = state === "closed";
+  // A running week is judged on what it should leave over; a closed one on what
+  // was actually put away, which is the only figure the plan counts.
+  const met = (closed ? detail.saved : detail.surplus) >= detail.target;
 
   return (
     <div className="space-y-4">
@@ -160,33 +166,63 @@ function Header({ detail, today }: { detail: WeekDetail; today: string }) {
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Week {week.rotation_week} ·{" "}
-            {state === "closed"
-              ? `Closed by ${week.closed_by ?? "somebody"}`
-              : state === "pending"
-                ? "Ended, waiting on money"
-                : "Running"}
+            {closed ? (
+              <>
+                Target {aud(detail.target)} · saved{" "}
+                <span
+                  className={
+                    met
+                      ? "font-semibold text-emerald-600 dark:text-emerald-400"
+                      : "font-semibold text-red-600 dark:text-red-400"
+                  }
+                >
+                  {aud(detail.saved)}
+                </span>{" "}
+                · closed by {week.closed_by ?? "somebody"}
+              </>
+            ) : state === "pending" ? (
+              "Ended, waiting on money"
+            ) : (
+              "Running"
+            )}
           </p>
         </div>
 
-        {/* The same figures the week's card shows, in the same order, so
-            moving from the overview to a week is not a change of subject.
-            "In" is what the week is meant to bring in, not what has landed:
-            what has landed is "To arrive" read backwards. */}
+        {/* The week in the order the money actually moves: what comes in
+            without an invoice, what has to be billed, the two together, what
+            goes out, and what survives. Every figure here is the week as it is
+            meant to go, not only what has landed. */}
         <div className="flex flex-wrap items-center gap-5">
-          <Figure label="In" value={aud(detail.expected_income)} />
+          <Figure label="Cash" value={aud(detail.cash_in)} />
+          <Figure label="Billed" value={aud(detail.invoiced_in)} />
+          <Figure label="Total" value={aud(detail.expected_income)} />
           <Figure
-            label="To arrive"
-            value={aud(detail.outstanding)}
-            tone={detail.outstanding > 0 ? "wait" : "plain"}
+            label="Out"
+            value={aud(detail.expenses_total)}
+            tone={closed ? "plain" : "out"}
           />
-          <Figure label="Out" value={aud(detail.expenses_total)} tone="out" />
+          {/* Once the week is closed these are history and stop shouting. The
+              only question left is whether the target was met, so the target is
+              the one figure that keeps a colour. */}
           <Figure
             label="Excess"
             value={aud(detail.surplus)}
             strong
-            tone={detail.surplus < 0 ? "bad" : met ? "in" : "plain"}
+            tone={
+              closed
+                ? "plain"
+                : detail.surplus < 0
+                  ? "bad"
+                  : met
+                    ? "in"
+                    : "plain"
+            }
           />
-          <Figure label="Target" value={aud(detail.target)} />
+          <Figure
+            label="Target"
+            value={aud(detail.target)}
+            tone={closed ? (met ? "in" : "bad") : "plain"}
+          />
         </div>
       </div>
 
@@ -1218,7 +1254,8 @@ function AddEntry({
           </Labelled>
         )}
 
-        <div className="grid grid-cols-3 gap-3">
+        {/* Three across is fine on a laptop and unusable on a phone. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Labelled label="Amount (AUD)" required>
             <input
               name="amount"
@@ -1299,16 +1336,21 @@ function AddEntry({
  */
 function Expenses({
   weekId,
+  weekEnd,
   closed,
   standing,
   recorded,
   total,
+  detail,
 }: {
   weekId: string;
+  /** The week's last day, which decides which standing costs it pays. */
+  weekEnd: string;
   closed: boolean;
   standing: ExpenseItem[];
   recorded: WeekDetail["expenses"];
   total: number;
+  detail: WeekDetail;
 }) {
   const [adding, setAdding] = useState(false);
   const [showFixed, setShowFixed] = useState(false);
@@ -1334,7 +1376,9 @@ function Expenses({
         standing: null as number | null,
       }))
     : standing
-        .filter((i) => i.is_active)
+        // A cost that starts later belongs to later weeks. Without this, adding
+        // one today would show up in every open week behind it.
+        .filter((i) => appliesToWeek(i, weekEnd))
         .map((i) => {
           const o = overrides.get(i.id);
           return {
@@ -1482,7 +1526,118 @@ function Expenses({
             + Something unexpected
           </button>
         ))}
+
+      <CoveredBy detail={detail} />
     </section>
+  );
+}
+
+
+/**
+ * Who pays the week: the cash first, the invoicing for whatever is left.
+ *
+ * The bills are meant to come out of the money that is already in hand, which
+ * is the cash and the transfers, both settled the week the work is done. Only
+ * what that does not reach has to wait on an invoice being raised and paid, and
+ * that is the number worth seeing: it says whether the week stands on its own
+ * or is leaning on the billing. Whatever survives the costs is the saving.
+ */
+function CoveredBy({ detail }: { detail: WeekDetail }) {
+  const short = detail.short_from_invoicing > 0;
+  const closed = detail.state === "closed";
+
+  return (
+    <div className="mt-4 rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200 dark:bg-slate-950/40 dark:ring-slate-800">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        How it is covered
+      </h3>
+      <dl className="mt-3 space-y-1.5">
+        <CoverRow label="Cash in" value={aud(detail.cash_in)} />
+        <CoverRow
+          label="The week's costs"
+          value={`- ${aud(detail.expenses_total)}`}
+        />
+
+        <div className="border-t border-slate-200 pt-1.5 dark:border-slate-800">
+          {short ? (
+            <CoverRow
+              label="Short, from invoicing"
+              value={aud(detail.short_from_invoicing)}
+              tone="warn"
+            />
+          ) : (
+            <CoverRow
+              label="Cash left over"
+              value={aud(detail.cash_left)}
+              tone="good"
+            />
+          )}
+          <CoverRow label="Invoiced this week" value={aud(detail.invoiced_in)} />
+        </div>
+
+        <div className="border-t border-slate-200 pt-1.5 dark:border-slate-800">
+          <CoverRow
+            label="Left to save"
+            value={aud(detail.surplus)}
+            tone={detail.surplus < 0 ? "bad" : "good"}
+            strong={!closed}
+          />
+          {/* A closed week has two figures, and the second one is the truth:
+              what was confirmed into the vault at close. They differ whenever
+              he could see something this page could not, and showing both is
+              how that difference stays visible instead of being argued with. */}
+          {closed && (
+            <CoverRow
+              label="Saved in vault"
+              value={aud(detail.saved)}
+              tone={detail.saved < 0 ? "bad" : "good"}
+              strong
+            />
+          )}
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function CoverRow({
+  label,
+  hint,
+  value,
+  tone = "plain",
+  strong = false,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  tone?: "plain" | "good" | "warn" | "bad";
+  strong?: boolean;
+}) {
+  const colour =
+    tone === "good"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : tone === "warn"
+        ? "text-amber-600 dark:text-amber-400"
+        : tone === "bad"
+          ? "text-rose-600 dark:text-rose-400"
+          : "text-slate-900 dark:text-slate-100";
+
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-sm text-slate-700 dark:text-slate-300">
+        {label}
+        {hint && (
+          <span className="ml-2 text-[11px] text-slate-400 dark:text-slate-500">
+            {hint}
+          </span>
+        )}
+      </dt>
+      <dd
+        className={`text-sm ${strong ? "font-bold" : "font-medium"} ${colour}`}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }
 

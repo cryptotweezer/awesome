@@ -56,9 +56,14 @@ async function authenticateKey(raw: string): Promise<Agent | null> {
     return null;
   }
 
+  // Two timestamps nothing waits on, so they go together rather than one after
+  // the other: every round trip to the database is a round trip the caller is
+  // sitting through, and these were adding one to the front of every tool call.
   const now = new Date().toISOString();
-  await supabase.from("agent_keys").update({ last_used_at: now }).eq("id", data.id);
-  await touchOrg(data.org_id, now);
+  await Promise.all([
+    supabase.from("agent_keys").update({ last_used_at: now }).eq("id", data.id),
+    touchOrg(data.org_id, now),
+  ]);
 
   return {
     id: data.id,
@@ -73,9 +78,9 @@ async function authenticateOAuth(raw: string): Promise<Agent | null> {
   const found = await findByAccessToken(raw);
   if (!found) return null;
 
+  // Same reasoning as the key path: two timestamps, one round trip.
   const now = new Date().toISOString();
-  await touchToken(found.id);
-  await touchOrg(found.orgId, now);
+  await Promise.all([touchToken(found.id), touchOrg(found.orgId, now)]);
 
   return {
     id: found.id,

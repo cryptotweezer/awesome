@@ -7,7 +7,7 @@ import {
   entriesAndExpensesFor,
   figuresFor,
   stateOf,
-  syncWeek,
+  syncWeeks,
 } from "@/lib/data/weeks";
 import { listExpenseItems } from "@/lib/data/expenses";
 import { todayInSydney } from "@/lib/format";
@@ -32,18 +32,26 @@ export default async function SavingsOverviewPage() {
   const today = todayInSydney();
 
   const plan = await currentPlan(org.id, today);
-  const weeks = await ensureWeeks(org.id, today);
+  // The plan is handed over rather than read again: `ensureWeeks` needs the same
+  // row, and on a page that is opened all day a round trip is a round trip.
+  const weeks = await ensureWeeks(org.id, today, plan);
 
   // Only the weeks on screen are brought into step with billing: syncing a year
   // of history on every page load would be a lot of work to change nothing.
+  // `syncWeeks` reads the client list and the last service dates ONCE for the
+  // whole pass instead of once per week, which is most of what this page waits
+  // for.
   const recentWeeks = fourToWorkOn(weeks, today);
   const openWeeks = weeks.filter((w) => !w.closed_at);
   const toSync = new Set([...recentWeeks, ...openWeeks].map((w) => w.id));
-  await Promise.all([...toSync].map((id) => syncWeek(org.id, id)));
+  await syncWeeks(org.id, [...toSync], today);
 
-  const [progress, standing] = await Promise.all([
+  const [progress, standing, plans] = await Promise.all([
     plan ? planProgress(org.id, plan, today) : null,
     listExpenseItems(org.id, { activeOnly: true }),
+    // A week is judged against the target of the plan it was run under, which is
+    // not always the one running now: weeks stay open long after a plan ends.
+    listPlans(org.id),
   ]);
 
   // The weeks on screen, each one once, and their rows in two queries rather
@@ -57,9 +65,6 @@ export default async function SavingsOverviewPage() {
     onScreen.map((w) => w.id),
   );
 
-  // A week is judged against the target of the plan it was run under, which is
-  // not always the one running now: weeks stay open long after a plan ends.
-  const plans = await listPlans(org.id);
   const targets = new Map(plans.map((p) => [p.id, p.weekly_target]));
   const byId = new Map(
     onScreen.map((w) => [
@@ -86,7 +91,15 @@ export default async function SavingsOverviewPage() {
         </div>
         {progress && (
           <div className="flex flex-wrap gap-3">
-            <Stat label="Saved so far" value={aud(progress.saved)} tone="in" />
+            {/* The net figure, the same one the Plan page shows: what the
+                weeks confirmed, less anything taken back out of the vault. Two
+                different "saved" on two screens is how a number stops being
+                believed. */}
+            <Stat
+              label="Saved so far"
+              value={aud(progress.net_saved)}
+              tone="in"
+            />
             <Stat label="Plan asks by now" value={aud(progress.due_so_far)} />
             <Stat
               label={progress.ahead_by >= 0 ? "Ahead by" : "Behind by"}
@@ -288,8 +301,13 @@ function billingFor(week: SavingsWeek, entries: WeekEntry[]): BillingLine[] {
  * last because by then it is a reassurance rather than a question.
  */
 function WeekCard({ summary: s }: { summary: Summary }) {
-  const met = s.surplus >= s.target;
-  const over = s.surplus - s.target;
+  // A running week is read on its excess, which is what it should leave over.
+  // Once it is closed the question changes: what actually went into the vault,
+  // which can be less, and that is the figure the plan counts.
+  const closed = s.state === "closed";
+  const headline = closed ? s.saved : s.surplus;
+  const met = headline >= s.target;
+  const over = headline - s.target;
   const tone =
     s.state === "closed"
       ? met
@@ -323,19 +341,24 @@ function WeekCard({ summary: s }: { summary: Summary }) {
       </div>
 
       <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-        Excess
+        {closed ? "Saved" : "Excess"}
       </p>
       <p
         className={`text-2xl font-bold ${
-          s.surplus < 0
+          headline < 0
             ? "text-red-600 dark:text-red-400"
             : met
               ? "text-emerald-600 dark:text-emerald-400"
               : "text-slate-900 dark:text-slate-100"
         }`}
       >
-        {aud(s.surplus)}
+        {aud(headline)}
       </p>
+      {closed && s.surplus !== s.saved && (
+        <p className="text-[11px] text-slate-400 dark:text-slate-500">
+          of {aud(s.surplus)} the week was worth
+        </p>
+      )}
       <p className="text-[11px] text-slate-500 dark:text-slate-400">
         Savings target {aud(s.target)}
         <span

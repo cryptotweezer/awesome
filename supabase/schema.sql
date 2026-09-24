@@ -436,6 +436,11 @@ create table if not exists awesome.expense_items (
   category      text          not null default 'australia',
   -- An item that no longer applies is archived, not deleted.
   is_active     boolean       not null default true,
+  -- When this cost started, for one that has not always existed. Null means it
+  -- has always been there and every week counts it, which is the common case.
+  -- A date means only the week it falls in and the ones after it pay for it, so
+  -- adding a cost today cannot rewrite what a past week cost.
+  starts_on     date,
   sort_order    integer       not null default 0,
   created_at    timestamptz   not null default now(),
   updated_at    timestamptz   not null default now(),
@@ -488,6 +493,11 @@ create table if not exists awesome.loan_payments (
   org_id      uuid          not null,
   loan_id     uuid          not null,
   amount      numeric(12,2) not null,
+  -- Which vault paid for it, when one did: 'aus', 'col', or null for the
+  -- ordinary case, paid out of the week's money with the vault untouched. The
+  -- payment is recorded ONCE, here, and the vault reads it. A matching row in
+  -- `vault_movements` would be a second copy of the same truth.
+  from_vault  text,
   -- The day the money left, which is not always the day it was entered.
   paid_on     date          not null,
   note        text,
@@ -495,6 +505,8 @@ create table if not exists awesome.loan_payments (
   created_at  timestamptz   not null default now(),
   constraint loan_payments_pkey primary key (id),
   constraint loan_payments_amount_positive check (amount > 0),
+  constraint loan_payments_from_vault_check
+    check (from_vault is null or from_vault in ('aus', 'col')),
   constraint loan_payments_loan_fkey foreign key (loan_id)
     references awesome.loans(id) on delete cascade,
   constraint loan_payments_org_fkey foreign key (org_id)
@@ -521,6 +533,11 @@ create table if not exists awesome.savings_plans (
     starts_on + (round((horizon_months::numeric / 12) * 52)::int * 7 - 1)
   ) stored,
   notes          text,
+  -- The owner saying "that one is settled, file it". FINISHED stays derived
+  -- from the date; this is the decision that follows it, which is why it is
+  -- stored: a plan's last weeks often close after its last date, and it has to
+  -- stay in front of the owner until they do.
+  archived_at    timestamptz,
   created_at     timestamptz   not null default now(),
   updated_at     timestamptz   not null default now(),
   constraint savings_plans_pkey primary key (id),
@@ -671,6 +688,64 @@ create table if not exists awesome.week_expenses (
     references awesome.orgs(id) on delete cascade
 );
 
+-- The vault: where the saving actually lives.
+--
+-- A week's EXCESS and what was SAVED are two different numbers, and this table
+-- exists because of the gap between them. The week works out what it should
+-- have left over; closing it confirms what really went in, and only the
+-- confirmed figure counts.
+--
+-- TWO VAULTS, ONE CURRENCY. `aus` holds every confirmed weekly saving and is
+-- still spendable; `col` is what has been sent to Colombia and is frozen. Both
+-- in AUD, so "total saved" is one number that means something. A transfer also
+-- records the rate of the day and the pesos that arrived, because that is the
+-- figure that will be asked about in Colombia and the rate is unrecoverable
+-- afterwards.
+--
+-- NO BALANCE IS STORED, and there is no deposit row per week. Vault AUS is the
+-- sum of what the closed weeks confirmed minus what has left it; Vault COL is
+-- what was sent minus what came back. Correcting a week therefore fixes the
+-- vault by itself, the same way a loan's balance and an overdue invoice are
+-- derived. So this table holds only the money MOVING.
+create table if not exists awesome.vault_movements (
+  id          uuid          not null default gen_random_uuid(),
+  org_id      uuid          not null,
+  -- transfer    AUS to COL, with the rate and the pesos that arrived
+  -- withdrawal  money leaving a vault for something else, with its reason
+  -- deposit     money going in that is not a week's saving
+  kind        text          not null,
+  -- Which vault the money leaves (transfer, withdrawal) or enters (deposit).
+  vault       text          not null,
+  -- Always AUD, always positive: the kind carries the direction, not the sign.
+  amount      numeric(12,2) not null,
+  rate        numeric(14,4),
+  amount_cop  numeric(16,2),
+  -- The day the money actually moved, not the day it was typed in.
+  occurred_on date          not null,
+  reason      text,
+  note        text,
+  recorded_by text,
+  created_at  timestamptz   not null default now(),
+  updated_at  timestamptz   not null default now(),
+  constraint vault_movements_pkey primary key (id),
+  constraint vault_movements_kind_check
+    check (kind in ('transfer', 'withdrawal', 'deposit')),
+  constraint vault_movements_vault_check check (vault in ('aus', 'col')),
+  -- A transfer is one-way by definition. Money coming back from Colombia is a
+  -- withdrawal from COL, which is what it feels like.
+  constraint vault_movements_transfer_check
+    check (kind <> 'transfer' or vault = 'aus'),
+  constraint vault_movements_amount_positive check (amount > 0),
+  constraint vault_movements_rate_positive check (rate is null or rate > 0),
+  constraint vault_movements_cop_positive
+    check (amount_cop is null or amount_cop > 0),
+  -- A withdrawal with no reason is the one movement nobody can explain later.
+  constraint vault_movements_reason_check
+    check (kind <> 'withdrawal' or btrim(coalesce(reason, '')) <> ''),
+  constraint vault_movements_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
 create index if not exists oauth_codes_expiry_idx on awesome.oauth_codes (expires_at);
 create index if not exists oauth_tokens_org_idx   on awesome.oauth_tokens (org_id);
 create index if not exists oauth_tokens_live_idx  on awesome.oauth_tokens (org_id, created_at desc)
@@ -693,6 +768,7 @@ create index if not exists expense_items_org_idx    on awesome.expense_items (or
 create index if not exists loans_org_idx            on awesome.loans (org_id, sort_order, name);
 create index if not exists loan_payments_loan_idx   on awesome.loan_payments (loan_id, paid_on desc);
 create index if not exists loan_payments_org_idx    on awesome.loan_payments (org_id, paid_on desc);
+create index if not exists loan_payments_vault_idx  on awesome.loan_payments (org_id, from_vault, paid_on desc) where from_vault is not null;
 create index if not exists savings_plans_org_idx    on awesome.savings_plans (org_id, starts_on desc);
 create index if not exists savings_weeks_org_idx   on awesome.savings_weeks (org_id, week_start desc);
 create index if not exists savings_weeks_plan_idx  on awesome.savings_weeks (plan_id, week_start);
@@ -702,6 +778,49 @@ create index if not exists week_entries_org_idx     on awesome.week_entries (org
 create index if not exists week_entries_invoice_idx on awesome.week_entries (invoice_id) where invoice_id is not null;
 create index if not exists week_expenses_week_idx   on awesome.week_expenses (week_id);
 create index if not exists week_expenses_org_idx    on awesome.week_expenses (org_id);
+create index if not exists vault_movements_org_idx  on awesome.vault_movements (org_id, occurred_on desc, created_at desc);
+
+-- Thirty days to change your mind about deleting a plan.
+--
+-- Deleting a plan deletes its weeks, and with them the part of Vault AUS they
+-- had filled, because the vault keeps no balance of its own. Correct when it is
+-- meant, unrecoverable when it is not: there is no other copy of what was done
+-- each day, what was paid and what each week cost.
+--
+-- WHY A COPY AND NOT A FLAG. A `deleted_at` on the plan would have been less
+-- code and more risk: every read of `savings_weeks` in the app would have to
+-- remember to exclude a deleted plan's weeks, and the first one that forgot
+-- would quietly put that money back in the vault. These rows are really gone
+-- from the live tables, so nothing else needs to know this table exists, the
+-- vault drops the moment the delete happens, and the undo is an insert.
+--
+-- The payload is the plan, its weeks, the work recorded on them and what they
+-- cost, as they were. A restore puts them back under their ORIGINAL ids, so an
+-- invoice still linked to a week line finds it again. After thirty days
+-- `purge_deleted_plans` removes them for good, on the daily cron.
+create table if not exists awesome.deleted_plans (
+  id          uuid          not null default gen_random_uuid(),
+  org_id      uuid          not null,
+  -- The plan's own id, so a restore is the same plan and not a copy of it.
+  plan_id     uuid          not null,
+  name        text,
+  starts_on   date          not null,
+  ends_on     date          not null,
+  -- What it held, for the line the screen shows without opening the payload.
+  weeks       integer       not null default 0,
+  saved       numeric(12,2) not null default 0,
+  deleted_at  timestamptz   not null default now(),
+  deleted_by  text,
+  -- { plan, weeks, entries, expenses }, as they were.
+  payload     jsonb         not null,
+  constraint deleted_plans_pkey primary key (id),
+  constraint deleted_plans_plan_key unique (org_id, plan_id),
+  constraint deleted_plans_org_fkey foreign key (org_id)
+    references awesome.orgs(id) on delete cascade
+);
+
+create index if not exists deleted_plans_org_idx
+  on awesome.deleted_plans (org_id, deleted_at desc);
 
 -- ---------------------------------------------------------------------
 --  Access. RLS on, no policies: service_role only, from the server only.
@@ -725,6 +844,30 @@ alter table awesome.savings_plans enable row level security;
 alter table awesome.savings_weeks enable row level security;
 alter table awesome.week_entries  enable row level security;
 alter table awesome.week_expenses enable row level security;
+alter table awesome.vault_movements enable row level security;
+alter table awesome.deleted_plans enable row level security;
+
+-- The undo window on a deleted plan, closed. Called every day by the same cron
+-- that trims the agent log; thirty days is long enough to notice a mistake and
+-- short enough that the bin is not a second database.
+create or replace function awesome.purge_deleted_plans(p_days integer default 30)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  removed integer;
+begin
+  delete from awesome.deleted_plans
+  where deleted_at < now() - (p_days || ' days')::interval;
+  get diagnostics removed = row_count;
+  return removed;
+end;
+$$;
+
+revoke all on function awesome.purge_deleted_plans(integer) from public, anon, authenticated;
+grant execute on function awesome.purge_deleted_plans(integer) to service_role;
 
 -- Codes are worthless once used or expired, and a table of dead codes is a
 -- table nobody prunes.
@@ -997,6 +1140,11 @@ create trigger trg_week_entries_touch
 drop trigger if exists trg_week_expenses_touch on awesome.week_expenses;
 create trigger trg_week_expenses_touch
   before update on awesome.week_expenses
+  for each row execute function awesome.touch_updated_at();
+
+drop trigger if exists trg_vault_movements_touch on awesome.vault_movements;
+create trigger trg_vault_movements_touch
+  before update on awesome.vault_movements
   for each row execute function awesome.touch_updated_at();
 
 drop trigger if exists trg_invoice_before_write on awesome.invoices;

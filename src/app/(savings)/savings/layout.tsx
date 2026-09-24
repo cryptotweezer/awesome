@@ -35,7 +35,51 @@ export default async function SavingsLayout({
           reads better centred; this one is tables of weeks and money side by
           side, and every pixel given back to a margin is a column somebody has
           to scroll for. */}
-      <div className="flex gap-6 px-6 py-6">
+      {/* On a phone the sidebar is gone, so the same links become a row that
+          scrolls sideways. Without it the section had no navigation at all
+          below the md breakpoint: you could reach a page and not leave it. */}
+      <div className="space-y-3 px-4 py-4 md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <Link href="/savings" className="flex items-center gap-2.5">
+            <Image
+              src="/logo_black.png"
+              alt={name}
+              width={26}
+              height={26}
+              className="dark:hidden"
+              priority
+            />
+            <Image
+              src="/logo_white.png"
+              alt=""
+              width={26}
+              height={26}
+              className="hidden dark:block"
+              priority
+            />
+            <div className="leading-tight">
+              <p className="text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                {name}
+              </p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                Savings
+              </p>
+            </div>
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/"
+              className="text-xs font-medium text-slate-500 underline-offset-2 hover:underline dark:text-slate-400"
+            >
+              Billing
+            </Link>
+            <ThemeToggle />
+          </div>
+        </div>
+        <SavingsNav variant="bar" />
+      </div>
+
+      <div className="flex gap-6 px-4 pb-6 md:px-6 md:py-6">
         <aside className="hidden w-56 shrink-0 md:block">
           <div className="sticky top-6 space-y-4">
             <Link href="/savings" className="flex items-center gap-2.5 px-2">

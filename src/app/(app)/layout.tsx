@@ -51,7 +51,10 @@ export default async function AppLayout({
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950">
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
+        {/* Wraps on a phone: the five links do not fit beside the name and the
+            sign-out button, and a header that does not wrap makes the whole page
+            scroll sideways. */}
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 md:px-6">
           <Link href="/" className="flex shrink-0 items-center gap-2.5">
             {/*
               Each business wears its own mark. Awesome ships two files, one per
@@ -97,7 +100,9 @@ export default async function AppLayout({
             </span>
           </Link>
 
-          <NavLinks disabled={!org} savings={awesome} />
+          <div className="order-3 w-full md:order-none md:w-auto">
+            <NavLinks disabled={!org} savings={awesome} />
+          </div>
 
           <div className="flex items-center gap-3">
             <span className="hidden text-sm text-slate-500 md:inline dark:text-slate-400">
@@ -116,7 +121,7 @@ export default async function AppLayout({
 
       {org?.is_demo && <TrialBanner orgId={org.id} />}
 
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 py-8 md:px-6">{children}</main>
 
       {/* Not a page: a panel over whatever page you are on, because the
           question is nearly always about what is on the screen. */}

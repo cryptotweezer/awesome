@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import type { ExpenseCategory, ExpenseItem } from "@/lib/types";
-import { EXPENSE_CATEGORIES, aud } from "@/lib/savings";
+import { EXPENSE_CATEGORIES, aud, shortDate } from "@/lib/savings";
 import {
   saveExpenseAction,
   setExpenseActiveAction,
@@ -133,6 +133,13 @@ function Table({
               )}
               <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
                 {aud(i.weekly_amount)}
+                {/* Only shown when there is one: most costs have always been
+                    there, and "from always" is noise on every row. */}
+                {i.starts_on && (
+                  <span className="ml-2 text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                    from {shortDate(i.starts_on)}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-3">
                 <div className="flex justify-end gap-1">
@@ -233,6 +240,24 @@ function ExpenseDialog({
               />
             </label>
           </div>
+
+          {/* The one field that stops this list rewriting the past. A cost that
+              only started in October should not appear in September's week. */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Counts from
+            </span>
+            <input
+              name="starts_on"
+              type="date"
+              defaultValue={item?.starts_on ?? ""}
+              className="input"
+            />
+            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+              Leave it empty and every week counts this cost. Put a date and only
+              that week and the ones after it pay for it, so no past week moves.
+            </span>
+          </label>
 
           {state.error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900">

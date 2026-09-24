@@ -72,6 +72,7 @@ export async function saveLoanAction(
 
   revalidatePath("/savings/loans");
   revalidatePath("/savings/plan");
+  revalidatePath("/savings/vault");
   return { ok: true };
 }
 
@@ -90,6 +91,7 @@ export async function setLoanActiveAction(
   }
   revalidatePath("/savings/loans");
   revalidatePath("/savings/plan");
+  revalidatePath("/savings/vault");
   return { ok: true };
 }
 
@@ -107,6 +109,7 @@ export async function deleteLoanAction(
   }
   revalidatePath("/savings/loans");
   revalidatePath("/savings/plan");
+  revalidatePath("/savings/vault");
   return { ok: true };
 }
 
@@ -122,11 +125,19 @@ export async function recordLoanPaymentAction(
     return { ok: false, error: "The payment must be more than 0." };
   }
 
+  // Where the money came from. Blank is the ordinary case: the week's money,
+  // with the vault untouched. "aus" or "col" takes it out of the saving.
+  const source = str(formData, "from_vault");
+  if (source !== null && source !== "aus" && source !== "col") {
+    return { ok: false, error: "That is not one of the vaults." };
+  }
+
   try {
     const { org, member } = await awesome();
     await recordLoanPayment(org.id, {
       loan_id: loanId,
       amount,
+      from_vault: source,
       // The day the money left, which defaults to today in Sydney rather than
       // to a UTC date that is tomorrow for half the evening.
       paid_on: str(formData, "paid_on") ?? todayInSydney(),
@@ -139,6 +150,7 @@ export async function recordLoanPaymentAction(
 
   revalidatePath("/savings/loans");
   revalidatePath("/savings/plan");
+  revalidatePath("/savings/vault");
   return { ok: true };
 }
 
@@ -156,5 +168,6 @@ export async function deleteLoanPaymentAction(
   }
   revalidatePath("/savings/loans");
   revalidatePath("/savings/plan");
+  revalidatePath("/savings/vault");
   return { ok: true };
 }

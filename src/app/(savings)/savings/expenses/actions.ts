@@ -46,10 +46,18 @@ export async function saveExpenseAction(
     return { ok: false, error: "Pick a category." };
   }
 
+  // Blank means it has always been there, which is what every cost meant before
+  // this field existed. A date keeps it out of the weeks that ran before it.
+  const startsOn = str(formData, "starts_on");
+  if (startsOn && !/^\d{4}-\d{2}-\d{2}$/.test(startsOn)) {
+    return { ok: false, error: "That is not a date." };
+  }
+
   const input: ExpenseItemInput = {
     name,
     weekly_amount: amount,
     category: category as ExpenseCategory,
+    starts_on: startsOn,
   };
 
   try {

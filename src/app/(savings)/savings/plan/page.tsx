@@ -1,31 +1,39 @@
-import Link from "next/link";
-import { listLoans } from "@/lib/data/loans";
 import { awesomeForPage } from "@/lib/data/org";
 import {
-  currentPlan,
+  listDeletedPlans,
   listPlans,
+  planInFocus,
   plannedTotal,
   weeksOf,
 } from "@/lib/data/savings-plan";
-import { planProgress } from "@/lib/data/savings-progress";
+import { milestonesFor, planProgress } from "@/lib/data/savings-progress";
 import { todayInSydney } from "@/lib/format";
 import { aud } from "@/lib/savings";
+import { vaultOutflows } from "@/lib/data/vault";
 import { listWeeks } from "@/lib/data/weeks";
-import { PlanPanel, type PlanResult } from "./plan-form";
+import { MilestoneCards } from "./milestones";
+import { DeletedPlans } from "./deleted-plans";
+import { PlanHistory, PlanPanel, type PlanResult } from "./plan-form";
 
 export default async function SavingsPlanPage() {
   const org = await awesomeForPage();
   const today = todayInSydney();
 
-  const [plans, loans, weeks] = await Promise.all([
+  const [plans, weeks, outflows, binned] = await Promise.all([
     listPlans(org.id),
-    listLoans(org.id, { activeOnly: true }),
     // Read, never ensured: this page describes the plans, and opening weeks is
     // the overview's job.
     listWeeks(org.id),
+    // What has left the vault, so a plan can show what it saved AND KEPT.
+    vaultOutflows(org.id),
+    // Deleted plans still inside their thirty days.
+    listDeletedPlans(org.id),
   ]);
 
-  const running = await currentPlan(org.id, today);
+  // What the top of the page shows: the plan running today, or the last one
+  // that finished and has not been filed away yet. A plan does not leave the
+  // screen because a date passed; its last weeks are usually still open.
+  const focus = await planInFocus(org.id, today);
 
   // Each plan's result, from its own weeks. The figures of a closed week were
   // frozen as it closed, so a finished plan's result cannot move afterwards.
@@ -34,6 +42,15 @@ export default async function SavingsPlanPage() {
     const closed = mine.filter((w) => w.closed_at);
     const saved = closed.reduce((sum, w) => sum + (w.saved_amount ?? 0), 0);
     const targetTotal = plannedTotal(plan);
+
+    // Money that left the vault while this plan was running. A transfer to
+    // Vault COL is not in `outflows`: that money is still saved, only frozen.
+    const until = plan.ends_on < today ? plan.ends_on : today;
+    const takenOut = outflows
+      .filter((o) => o.on >= plan.starts_on && o.on <= until)
+      .reduce((sum, o) => sum + o.amount, 0);
+    const netSaved = Math.round((saved - takenOut) * 100) / 100;
+
     return {
       id: plan.id,
       name: plan.name,
@@ -45,23 +62,47 @@ export default async function SavingsPlanPage() {
       weeks_opened: mine.length,
       weeks_closed: closed.length,
       saved,
+      taken_out: Math.round(takenOut * 100) / 100,
+      net_saved: netSaved,
       target_total: targetTotal,
-      percent: targetTotal > 0 ? Math.round((saved / targetTotal) * 100) : 0,
-      met: saved >= targetTotal,
+      percent: targetTotal > 0 ? Math.round((netSaved / targetTotal) * 100) : 0,
+      met: netSaved >= targetTotal,
       finished: plan.ends_on < today,
+      archived: plan.archived_at !== null,
       notes: plan.notes,
+      // Its own stretches, from the weeks already in hand. No extra query, and
+      // the history can draw the same cards as the plan on screen.
+      milestones: milestonesFor(
+        plan,
+        closed.map((w) => ({
+          week_start: w.week_start,
+          saved: w.saved_amount ?? 0,
+          target: w.target_amount ?? plan.weekly_target,
+        })),
+        today,
+      ),
+      // Newest first, the way every other list of weeks in the app reads.
+      weeks: mine
+        .slice()
+        .sort((a, b) => b.week_start.localeCompare(a.week_start))
+        .map((w) => ({
+          id: w.id,
+          week_start: w.week_start,
+          week_end: w.week_end,
+          closed: Boolean(w.closed_at),
+          saved: w.closed_at ? (w.saved_amount ?? 0) : null,
+          // Its own frozen target if it has one, else what the plan asks for.
+          target: w.target_amount ?? plan.weekly_target,
+        })),
     };
   });
 
-  const current = results.find((r) => r.id === running?.id) ?? null;
-  const history = results.filter((r) => r.id !== running?.id);
-  const progress = running ? await planProgress(org.id, running, today) : null;
-
-  const owed = loans.reduce((sum, l) => sum + l.balance, 0);
-  const weekly = loans
-    .filter((l) => l.balance > 0)
-    .reduce((sum, l) => sum + l.weekly_payment, 0);
-  const weeksToClear = weekly > 0 ? Math.ceil(owed / weekly) : null;
+  const current = results.find((r) => r.id === focus?.id) ?? null;
+  const history = results.filter((r) => r.id !== focus?.id);
+  // The milestones belong to the plan the weeks are being judged against, so
+  // they are read from the running plan, or from the finished one still on
+  // screen, which is the same row in both cases.
+  const progress = focus ? await planProgress(org.id, focus, today) : null;
 
   return (
     <div className="max-w-5xl space-y-8">
@@ -76,7 +117,7 @@ export default async function SavingsPlanPage() {
         </div>
         {progress && progress.running && (
           <div className="flex flex-wrap gap-3">
-            <Stat label="Saved" value={aud(progress.saved)} tone="in" />
+            <Stat label="Saved" value={aud(progress.net_saved)} tone="in" />
             <Stat label="Of" value={aud(progress.target_total)} />
             <Stat
               label={progress.ahead_by >= 0 ? "Ahead by" : "Behind by"}
@@ -87,66 +128,33 @@ export default async function SavingsPlanPage() {
         )}
       </div>
 
-      {/* The order of operations, stated once and in plain words, because the
-          whole plan depends on it: the loans come out first. */}
-      <section
-        className={`rounded-2xl p-6 ring-1 ${
-          owed > 0
-            ? "bg-amber-50 ring-amber-200 dark:bg-amber-950/30 dark:ring-amber-900"
-            : "bg-emerald-50 ring-emerald-200 dark:bg-emerald-950/30 dark:ring-emerald-900"
-        }`}
-      >
-        {owed > 0 ? (
-          <>
-            <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-              First goal: clear the loans
-            </h2>
-            <p className="mt-1 text-sm text-amber-900/80 dark:text-amber-200/80">
-              <span className="font-semibold">{aud(owed)}</span> still owed,{" "}
-              {aud(weekly)} a week
-              {weeksToClear !== null && (
-                <>
-                  , about {weeksToClear}{" "}
-                  {weeksToClear === 1 ? "week" : "weeks"} to go
-                </>
-              )}
-              . Saving starts once this is gone.{" "}
-              <Link href="/savings/loans" className="font-semibold underline">
-                Loans
-              </Link>
-            </p>
-          </>
-        ) : (
-          <>
-            <h2 className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
-              No loans outstanding
-            </h2>
-            <p className="mt-1 text-sm text-emerald-900/80 dark:text-emerald-200/80">
-              Nothing to clear first. Pick the day week 1 starts and the plan is
-              running.
-            </p>
-          </>
-        )}
-      </section>
-
       <PlanPanel current={current} history={history} today={today} />
 
-      {progress && (
-        <>
-          <Milestones progress={progress} />
-          <Months progress={progress} />
-        </>
-      )}
+      {progress && <Milestones progress={progress} />}
+
+      {/* The plan running now is what the page is for; the ones before it are a
+          record, and a record sitting between the plan and its own milestones
+          reads as an interruption. The tally of all of them comes last, because
+          it is the conclusion of the list above it. */}
+      {history.length > 0 && <PlanHistory rows={history} />}
+
+      {binned.length > 0 && <DeletedPlans rows={binned} today={today} />}
+
+      <AllPlans rows={results} />
     </div>
   );
 }
 
 /**
- * The horizons a long plan is actually read at.
+ * The stretches a plan is read at, which come from its own length.
  *
- * A two-year figure is impossible to feel. A month is not: either this month is
- * on track or it is not, and four of those in a row is where six months comes
- * from. Each one is cumulative from the start, so they nest rather than compete.
+ * A two-year figure is impossible to feel. A month is not: either that month was
+ * on track or it was not. A one-month plan is cut into its weeks instead,
+ * because "the first month" would be the whole plan.
+ *
+ * Each card measures ITS OWN stretch and nothing before it, which is the whole
+ * point: cumulative bars had week 4 sitting at 25 per cent because week 1 had
+ * closed, before week 4 had begun. A stretch that has not started reads zero.
  */
 function Milestones({
   progress,
@@ -165,173 +173,82 @@ function Milestones({
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {progress.milestones.map((m) => {
-          const pct = Math.max(0, Math.min(100, m.percent));
-          const onTrack = m.saved >= m.due_so_far;
-          return (
-            <div
-              key={m.key}
-              className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  {m.label}
-                </p>
-                <span
-                  className={`text-xs font-semibold ${
-                    m.reached
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : onTrack
-                        ? "text-slate-500 dark:text-slate-400"
-                        : "text-red-600 dark:text-red-400"
-                  }`}
-                >
-                  {pct}%
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                by {m.ends_on}
-              </p>
-
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-                <div
-                  className={`h-full rounded-full ${
-                    m.reached
-                      ? "bg-emerald-500"
-                      : onTrack
-                        ? "bg-sky-500"
-                        : "bg-red-500"
-                  }`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-
-              <p className="mt-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-                {aud(m.saved)}
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                of {aud(m.target)}
-                {m.in_future && (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <span
-                      className={
-                        onTrack
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-red-600 dark:text-red-400"
-                      }
-                    >
-                      {onTrack ? "on track" : `${aud(m.due_so_far - m.saved)} behind`}
-                    </span>
-                  </>
-                )}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+      <MilestoneCards milestones={progress.milestones} />
     </section>
   );
 }
 
-function Months({
-  progress,
-}: {
-  progress: Awaited<ReturnType<typeof planProgress>>;
-}) {
-  if (progress.by_month.length === 0) {
-    return (
-      <p className="text-sm text-slate-500 dark:text-slate-400">
-        No week has been closed yet, so there is nothing to show by month. A
-        week counts here the moment it closes.
-      </p>
-    );
-  }
+/**
+ * Every plan ever run, in three numbers.
+ *
+ * A plan on its own answers "did I make that one". This answers the question
+ * underneath it, which is the one worth asking after a year of them: of all the
+ * plans that have finished, how many did I actually make, and how much of
+ * everything I set out to save did I save.
+ *
+ * Only finished plans count. A plan still running has not failed, it has not
+ * happened yet, and counting it would drag the figure down every time a new one
+ * starts.
+ */
+function AllPlans({ rows }: { rows: PlanResult[] }) {
+  const done = rows.filter((r) => r.finished);
+  if (done.length < 1) return null;
+
+  const met = done.filter((r) => r.met).length;
+  const saved = done.reduce((sum, r) => sum + r.net_saved, 0);
+  const asked = done.reduce((sum, r) => sum + r.target_total, 0);
+  const rate = Math.round((met / done.length) * 100);
+  const ofMoney = asked > 0 ? Math.round((saved / asked) * 100) : 0;
 
   return (
     <section className="space-y-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
-          Month by month
-        </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {progress.weeks_won} weeks over · {progress.weeks_even} level ·{" "}
-          {progress.weeks_lost} under
-        </p>
-      </div>
+      <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
+        Every plan so far
+      </h2>
 
-      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
-            <tr>
-              <th className="px-4 py-3 font-medium">Month</th>
-              <th className="px-4 py-3 font-medium">Weeks</th>
-              <th className="px-4 py-3 text-right font-medium">Target</th>
-              <th className="px-4 py-3 text-right font-medium">Saved</th>
-              <th className="px-4 py-3 text-right font-medium">Against</th>
-              <th className="px-4 py-3 text-right font-medium">Of target</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {progress.by_month.map((m) => {
-              const against = m.saved - m.target;
-              const pct =
-                m.target > 0 ? Math.round((m.saved / m.target) * 100) : 0;
-              return (
-                <tr key={m.month}>
-                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-                    {monthLabel(m.month)}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
-                    {m.weeks}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">
-                    {aud(m.target)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">
-                    {aud(m.saved)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 text-right ${
-                      against < 0
-                        ? "text-red-600 dark:text-red-400"
-                        : "text-emerald-600 dark:text-emerald-400"
-                    }`}
-                  >
-                    {against >= 0 ? "+" : ""}
-                    {aud(against)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        pct >= 100
-                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                          : pct >= 80
-                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                            : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300"
-                      }`}
-                    >
-                      {pct}%
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card
+          label="Plans finished"
+          value={String(done.length)}
+          note={`${met} made it · ${done.length - met} did not`}
+        />
+        <Card
+          label="Made the target"
+          value={`${rate}%`}
+          tone={rate >= 100 ? "in" : rate >= 50 ? "plain" : "bad"}
+          note="of the plans that have finished"
+        />
+        <Card
+          label="Of everything planned"
+          value={`${ofMoney}%`}
+          tone={ofMoney >= 100 ? "in" : "plain"}
+          note={`${aud(saved)} saved of ${aud(asked)}`}
+        />
       </div>
     </section>
   );
 }
 
-function monthLabel(month: string) {
-  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-AU", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+function Card({
+  label,
+  value,
+  note,
+  tone = "plain",
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: keyof typeof TONES;
+}) {
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </p>
+      <p className={`mt-1 text-2xl font-bold ${TONES[tone]}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{note}</p>
+    </div>
+  );
 }
 
 const TONES = {

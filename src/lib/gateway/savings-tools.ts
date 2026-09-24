@@ -1,8 +1,25 @@
 import "server-only";
-import { listClients } from "@/lib/data/clients";
+import {
+  listClients,
+  setClientRotation,
+  updateClient,
+} from "@/lib/data/clients";
 import { AWESOME_ORG_ID } from "@/lib/data/org";
-import { listExpenseItems } from "@/lib/data/expenses";
-import { listLoanPayments, listLoans, recordLoanPayment } from "@/lib/data/loans";
+import {
+  createExpenseItem,
+  deleteExpenseItem,
+  listExpenseItems,
+  updateExpenseItem,
+} from "@/lib/data/expenses";
+import {
+  createLoan,
+  deleteLoan,
+  deleteLoanPayment,
+  listLoanPayments,
+  listLoans,
+  recordLoanPayment,
+  updateLoan,
+} from "@/lib/data/loans";
 import {
   currentPlan,
   listPlans,
@@ -15,9 +32,12 @@ import {
   addEntry,
   closeBlockers,
   closeWeek,
+  deleteEntry,
+  deleteWeekExpense,
   ensureWeeks,
   entriesAndExpensesFor,
   figuresFor,
+  getEntry,
   getWeekDetail,
   lastServiceDates,
   listWeeks,
@@ -28,6 +48,12 @@ import {
   updateEntry,
   updateWeek,
 } from "@/lib/data/weeks";
+import {
+  deleteVaultMovement,
+  listVaultMovements,
+  recordVaultMovement,
+  vaultStatus,
+} from "@/lib/data/vault";
 import { todayInSydney } from "@/lib/format";
 import {
   WEEKDAYS,
@@ -38,7 +64,16 @@ import {
   weekdayLabel,
 } from "@/lib/savings";
 import type { ToolDef, ToolInput } from "@/lib/gateway/tools";
-import type { ExpenseCategory, SavingsWeek, WeekEntry } from "@/lib/types";
+import type {
+  BillingType,
+  Cadence,
+  ExpenseCategory,
+  ExpenseItem,
+  LoanWithBalance,
+  SavingsWeek,
+  VaultName,
+  WeekEntry,
+} from "@/lib/types";
 
 /**
  * The savings plan, for agents.
@@ -167,6 +202,87 @@ async function entryFor(
   return matches[0];
 }
 
+/**
+ * A fixed cost, by name or by id.
+ *
+ * By name because that is what an agent is told ("the insurance went up"), and
+ * the names of seventeen standing costs are unambiguous in practice. A partial
+ * name that matches two is refused rather than guessed at.
+ */
+async function expenseFor(
+  orgId: string,
+  input: ToolInput,
+): Promise<ExpenseItem> {
+  const items = await listExpenseItems(orgId);
+  const id = str(input, "expense_id");
+  if (id) {
+    const found = items.find((i) => i.id === id);
+    if (!found) throw new Error("No such cost");
+    return found;
+  }
+  const name = need(input, "name").toLowerCase();
+  const exact = items.filter((i) => i.name.toLowerCase() === name);
+  const matches = exact.length > 0
+    ? exact
+    : items.filter((i) => i.name.toLowerCase().includes(name));
+  if (matches.length === 0) throw new Error(`No cost called "${name}"`);
+  if (matches.length > 1) {
+    throw new Error(
+      `"${name}" matches ${matches.length}: ${matches.map((m) => m.name).join(", ")}`,
+    );
+  }
+  return matches[0];
+}
+
+/** A loan, by name or by id, refusing an ambiguous name rather than guessing. */
+async function loanFor(
+  orgId: string,
+  input: ToolInput,
+): Promise<LoanWithBalance> {
+  const loans = await listLoans(orgId);
+  const id = str(input, "loan_id");
+  if (id) {
+    const found = loans.find((l) => l.id === id);
+    if (!found) throw new Error("No such loan");
+    return found;
+  }
+  const name = need(input, "name").toLowerCase();
+  const exact = loans.filter((l) => l.name.toLowerCase() === name);
+  const matches = exact.length > 0
+    ? exact
+    : loans.filter((l) => l.name.toLowerCase().includes(name));
+  if (matches.length === 0) throw new Error(`No loan called "${name}"`);
+  if (matches.length > 1) {
+    throw new Error(
+      `"${name}" matches ${matches.length}: ${matches.map((m) => m.name).join(", ")}`,
+    );
+  }
+  return matches[0];
+}
+
+/** A client of this business, by name or by id. */
+async function clientFor(orgId: string, input: ToolInput) {
+  const clients = await listClients(orgId);
+  const id = str(input, "client_id");
+  if (id) {
+    const found = clients.find((c) => c.id === id);
+    if (!found) throw new Error("No such client");
+    return found;
+  }
+  const name = need(input, "client").toLowerCase();
+  const exact = clients.filter((c) => c.name.toLowerCase() === name);
+  const matches = exact.length > 0
+    ? exact
+    : clients.filter((c) => c.name.toLowerCase().includes(name));
+  if (matches.length === 0) throw new Error(`No client called "${name}"`);
+  if (matches.length > 1) {
+    throw new Error(
+      `"${name}" matches ${matches.length}: ${matches.map((m) => m.name).join(", ")}`,
+    );
+  }
+  return matches[0];
+}
+
 function dayNumber(input: ToolInput, key = "day"): number | null {
   const raw = str(input, key);
   if (!raw) return null;
@@ -202,6 +318,14 @@ function describeWeek(
     received: figures.received,
     still_to_arrive: figures.outstanding,
     expenses: figures.expenses_total,
+    // Who pays the week. Cash and transfers are in hand the week the work is
+    // done, so they cover the costs first; only `short_from_invoicing` has to
+    // wait on an invoice. Asked "did the cash cover the week", read these.
+    cash_in: figures.cash_in,
+    invoiced_in: figures.invoiced_in,
+    covered_by_cash: figures.covered_by_cash,
+    short_from_invoicing: figures.short_from_invoicing,
+    cash_left: figures.cash_left,
     saved: figures.saved,
     surplus: figures.surplus,
     target: figures.target,
@@ -239,7 +363,7 @@ export const savingsTools: Record<string, ToolDef> = {
       "READ THIS BEFORE ANY OTHER SAVINGS TOOL. How the savings plan is going: the weekly " +
       "target, what has been saved, whether that is ahead of or behind what the plan asks " +
       "by now, the current week, and every week still open with what each is waiting on. " +
-      "The loans come first: saving does not start until they are paid.",
+      "The loans are paid down week by week, alongside the saving: one does not wait for the other.",
     schema: NO_ARGS,
     handler: async (_input, ctx) => {
       const orgId = ctx.agent.orgId;
@@ -298,7 +422,11 @@ export const savingsTools: Record<string, ToolDef> = {
           : null,
         progress: progress
           ? {
-              saved: progress.saved,
+              // What the weeks confirmed, what has since left the vault, and
+              // what is therefore still saved. The last one is the answer.
+              saved_by_the_weeks: progress.saved,
+              taken_out_of_the_vault: progress.taken_out,
+              saved: progress.net_saved,
               plan_asks_by_now: progress.due_so_far,
               ahead_by: progress.ahead_by,
               target_total: progress.target_total,
@@ -311,13 +439,16 @@ export const savingsTools: Record<string, ToolDef> = {
             }
           : null,
         plans_before_this: finished,
+        // Each milestone measures its OWN stretch, not everything up to it: a
+        // month that has not started reads zero rather than inheriting the
+        // months before it.
         milestones: progress?.milestones ?? [],
         loans_first: {
           still_owed: loans.reduce((s, l) => s + l.balance, 0),
           weekly: loans
             .filter((l) => l.balance > 0)
             .reduce((s, l) => s + l.weekly_payment, 0),
-          note: "Saving starts once these are cleared.",
+          note: "Paid down week by week, alongside the saving.",
         },
         open_weeks: open
           .sort((a, b) => a.week_start.localeCompare(b.week_start))
@@ -368,6 +499,11 @@ export const savingsTools: Record<string, ToolDef> = {
             received: detail.received,
             outstanding: detail.outstanding,
             expenses_total: detail.expenses_total,
+            cash_in: detail.cash_in,
+            invoiced_in: detail.invoiced_in,
+            covered_by_cash: detail.covered_by_cash,
+            short_from_invoicing: detail.short_from_invoicing,
+            cash_left: detail.cash_left,
             saved: detail.saved,
             surplus: detail.surplus,
             target: detail.target,
@@ -521,7 +657,8 @@ export const savingsTools: Record<string, ToolDef> = {
     description:
       "The standing weekly costs, grouped by where they belong (Australia, Colombia, Visa). " +
       "These are what a normal week costs; a week that cost something different is recorded " +
-      "on that week and does not change these.",
+      "on that week and does not change these. An item with a `starts_on` date did not always " +
+      "exist and is only counted from that week onwards, so a week before it pays less.",
     schema: NO_ARGS,
     handler: async (_input, ctx) => {
       const items = await listExpenseItems(ctx.agent.orgId, {
@@ -957,13 +1094,23 @@ export const savingsTools: Record<string, ToolDef> = {
     idempotent: true,
     description:
       "Record a payment against a loan. The balance follows the payments, so this is the only " +
-      "place a loan goes down. Args: loan (name), amount, paid_on (defaults to today), note.",
+      "place a loan goes down. Leave `from_vault` out for the ordinary payment, which comes out " +
+      "of the week's money and never touches the saving. Pass \"aus\" or \"col\" only when the " +
+      "owner says the money came out of that vault, and it is then deducted from it (refused if " +
+      "the vault does not hold it). Either way the payment is recorded once, here. " +
+      "Args: loan (name), amount, paid_on (defaults to today), from_vault, note.",
     schema: obj(
       {
         loan: { type: "string" },
         loan_id: { type: "string" },
         amount: { type: "number" },
         paid_on: DATE,
+        from_vault: {
+          type: "string",
+          enum: ["aus", "col"],
+          description:
+            "Only when the payment came out of the saving. Left out otherwise.",
+        },
         note: { type: "string" },
         idempotency_key: { type: "string" },
       },
@@ -996,9 +1143,15 @@ export const savingsTools: Record<string, ToolDef> = {
         else throw new Error("Which loan? Name it, or use loans_status to list them.");
       }
 
+      const fromVault = str(input, "from_vault")?.toLowerCase() ?? null;
+      if (fromVault !== null && fromVault !== "aus" && fromVault !== "col") {
+        throw new Error('from_vault is "aus", "col", or left out entirely');
+      }
+
       await recordLoanPayment(orgId, {
         loan_id: loan.id,
         amount,
+        from_vault: fromVault,
         paid_on: str(input, "paid_on") ?? todayInSydney(),
         note: str(input, "note"),
         recorded_by: ctx.agent.label,
@@ -1006,12 +1159,17 @@ export const savingsTools: Record<string, ToolDef> = {
 
       const after = await listLoans(orgId, { activeOnly: true });
       const updated = after.find((l) => l.id === loan.id);
+      const vault = fromVault ? await vaultStatus(orgId) : null;
       return {
         loan: loan.name,
         paid: amount,
+        paid_from: fromVault ? `Vault ${fromVault.toUpperCase()}` : "the week's money",
         still_owed: updated?.balance,
         weeks_left: updated?.weeks_left,
         settled: (updated?.balance ?? 0) <= 0,
+        ...(vault
+          ? { vault_aus: vault.aus, vault_col: vault.col, total_saved: vault.total }
+          : {}),
       };
     },
   },
@@ -1070,10 +1228,582 @@ export const savingsTools: Record<string, ToolDef> = {
         starts_on: plan.starts_on,
         ends_on: plan.ends_on,
         total_over_the_plan: progress.target_total,
-        saved_so_far: progress.saved,
+        saved_so_far: progress.net_saved,
         ahead_by: progress.ahead_by,
         note: "Weeks are created from the start date up to today, and never past the plan's last week, the next time anything reads them.",
       };
+    },
+  },
+
+  // -- the vault ------------------------------------------------------------
+
+  vault_status: {
+    scope: "read",
+    description:
+      "What has ACTUALLY been saved, which is not what the weeks were worth. A week's excess " +
+      "is what it should leave over; the vault holds what was confirmed when it closed. Two " +
+      "balances, both in AUD: Vault AUS, saved but still reachable, and Vault COL, money sent " +
+      "to Colombia and frozen, shown beside the pesos it turned into. Nothing here is stored: " +
+      "it is the closed weeks plus the movements, so correcting an old week fixes the vault " +
+      "by itself. A loan paid out of the vault is in here too, as the loan payment it is. " +
+      "Read this before any question about savings totals.",
+    schema: NO_ARGS,
+    handler: async (_input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const [status, movements] = await Promise.all([
+        vaultStatus(orgId),
+        listVaultMovements(orgId, 10),
+      ]);
+      return {
+        ...status,
+        recent_movements: movements.map((m) => ({
+          id: m.id,
+          on: m.occurred_on,
+          what:
+            m.kind === "transfer"
+              ? "sent to Vault COL"
+              : m.kind === "withdrawal"
+                ? `taken out of Vault ${m.vault.toUpperCase()}`
+                : `put into Vault ${m.vault.toUpperCase()}`,
+          amount: m.amount,
+          rate: m.rate,
+          pesos: m.amount_cop,
+          reason: m.reason,
+          by: m.recorded_by,
+        })),
+      };
+    },
+  },
+
+  send_to_vault_col: {
+    scope: "write",
+    description:
+      "Record a transfer from Vault AUS to Vault COL, which is money sent to Colombia and " +
+      "frozen there. The owner makes the transfer himself on Wise; this records what it was. " +
+      "Give the rate of the day OR the pesos that arrived and the other is worked out, because " +
+      "the rate belonged to that minute and cannot be looked up afterwards. Refused if Vault " +
+      "AUS does not hold the amount. Args: amount (AUD, required), rate, pesos, on, note.",
+    schema: obj(
+      {
+        amount: { type: "number", description: "AUD leaving Vault AUS." },
+        rate: { type: "number", description: "Pesos per AUD on the day." },
+        pesos: { type: "number", description: "What arrived in COP." },
+        on: { ...DATE, description: "The day it moved. Defaults to today." },
+        note: { type: "string" },
+      },
+      ["amount"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const amount = num(input, "amount");
+      if (amount === null || amount <= 0) {
+        throw new Error("The amount must be more than 0");
+      }
+      const movement = await recordVaultMovement(orgId, {
+        kind: "transfer",
+        vault: "aus",
+        amount,
+        rate: num(input, "rate"),
+        amount_cop: num(input, "pesos"),
+        occurred_on: str(input, "on") ?? todayInSydney(),
+        reason: null,
+        note: str(input, "note"),
+        recorded_by: ctx.agent.label,
+      });
+      const status = await vaultStatus(orgId);
+      return {
+        sent: movement.amount,
+        rate: movement.rate,
+        pesos: movement.amount_cop,
+        on: movement.occurred_on,
+        vault_aus: status.aus,
+        vault_col: status.col,
+        total_saved: status.total,
+      };
+    },
+  },
+
+  record_vault_withdrawal: {
+    scope: "write",
+    description:
+      "Record money leaving a vault for something else. This is not a normal outgoing: the " +
+      "weekly costs belong to their week. This is the saving itself being spent, so the plan " +
+      "falls behind until it is put back, and the reason is required. Ask the owner what it " +
+      "was for rather than inventing a reason. Refused if the vault does not hold the amount. " +
+      "Args: amount (required), reason (required), vault (aus or col, defaults to aus), on, note.",
+    schema: obj(
+      {
+        amount: { type: "number" },
+        reason: { type: "string", description: "What it was really for." },
+        vault: { type: "string", enum: ["aus", "col"] },
+        on: { ...DATE, description: "The day it moved. Defaults to today." },
+        note: { type: "string" },
+      },
+      ["amount", "reason"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const amount = num(input, "amount");
+      if (amount === null || amount <= 0) {
+        throw new Error("The amount must be more than 0");
+      }
+      const vault = (str(input, "vault") ?? "aus").toLowerCase() as VaultName;
+      if (vault !== "aus" && vault !== "col") {
+        throw new Error('The vault is "aus" or "col"');
+      }
+      const movement = await recordVaultMovement(orgId, {
+        kind: "withdrawal",
+        vault,
+        amount,
+        rate: num(input, "rate"),
+        amount_cop: num(input, "pesos"),
+        occurred_on: str(input, "on") ?? todayInSydney(),
+        reason: need(input, "reason"),
+        note: str(input, "note"),
+        recorded_by: ctx.agent.label,
+      });
+      const status = await vaultStatus(orgId);
+      return {
+        taken: movement.amount,
+        out_of: `Vault ${vault.toUpperCase()}`,
+        reason: movement.reason,
+        vault_aus: status.aus,
+        vault_col: status.col,
+        total_saved: status.total,
+      };
+    },
+  },
+
+  record_vault_deposit: {
+    scope: "write",
+    description:
+      "Put money into a vault that did not come from a week: replenishing after a withdrawal, " +
+      "or money from outside the business. A week's saving needs no deposit, it lands in Vault " +
+      "AUS the moment the week is closed, so never use this to record one. " +
+      "Args: amount (required), vault (aus or col, defaults to aus), reason, on, note.",
+    schema: obj(
+      {
+        amount: { type: "number" },
+        vault: { type: "string", enum: ["aus", "col"] },
+        reason: { type: "string", description: "Where it came from." },
+        on: { ...DATE, description: "The day it moved. Defaults to today." },
+        note: { type: "string" },
+      },
+      ["amount"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const amount = num(input, "amount");
+      if (amount === null || amount <= 0) {
+        throw new Error("The amount must be more than 0");
+      }
+      const vault = (str(input, "vault") ?? "aus").toLowerCase() as VaultName;
+      if (vault !== "aus" && vault !== "col") {
+        throw new Error('The vault is "aus" or "col"');
+      }
+      const movement = await recordVaultMovement(orgId, {
+        kind: "deposit",
+        vault,
+        amount,
+        rate: num(input, "rate"),
+        amount_cop: num(input, "pesos"),
+        occurred_on: str(input, "on") ?? todayInSydney(),
+        reason: str(input, "reason"),
+        note: str(input, "note"),
+        recorded_by: ctx.agent.label,
+      });
+      const status = await vaultStatus(orgId);
+      return {
+        put_in: movement.amount,
+        into: `Vault ${vault.toUpperCase()}`,
+        vault_aus: status.aus,
+        vault_col: status.col,
+        total_saved: status.total,
+      };
+    },
+  },
+
+  delete_vault_movement: {
+    scope: "delete",
+    description:
+      "Remove a vault movement entered by mistake. The balances follow on their own. Confirm " +
+      "with the owner first: this is money history, and a transfer to Colombia deleted by " +
+      "accident takes its rate and its pesos with it. Get the id from vault_status.",
+    schema: obj({ movement_id: { type: "string" } }, ["movement_id"]),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      await deleteVaultMovement(orgId, need(input, "movement_id"));
+      const status = await vaultStatus(orgId);
+      return {
+        deleted: true,
+        vault_aus: status.aus,
+        vault_col: status.col,
+        total_saved: status.total,
+      };
+    },
+  },
+
+  // -- the standing list, the loans and the rotation -------------------------
+
+  set_weekly_expense: {
+    scope: "write",
+    description:
+      "Add a fixed weekly cost, or change one. These are what a NORMAL week costs, so this " +
+      "changes every week from now on; a week that cost something different once is " +
+      "`set_week_cost` instead, which touches that week only. " +
+      "`counts_from` is for a cost that did not always exist: leave it out and every week " +
+      "counts it, including the ones before today, which is right for a cost that has always " +
+      "been there and wrong for one that started in October. `where` is australia, colombia " +
+      "or visa, and it is only a grouping. " +
+      "Args: name (required), amount, where, counts_from, expense_id (to change one).",
+    schema: obj(
+      {
+        name: { type: "string" },
+        amount: { type: "number", description: "What it costs in a normal week." },
+        where: { type: "string", enum: ["australia", "colombia", "visa"] },
+        counts_from: {
+          ...DATE,
+          description:
+            "The week this cost starts counting from. Left out, it counts in every week.",
+        },
+        expense_id: { type: "string" },
+      },
+      ["name"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const name = need(input, "name");
+      const amount = num(input, "amount");
+      if (amount !== null && amount < 0) {
+        throw new Error("A cost cannot be negative");
+      }
+
+      const items = await listExpenseItems(orgId);
+      const id = str(input, "expense_id");
+      const found =
+        (id ? items.find((i) => i.id === id) : undefined) ??
+        items.find((i) => i.name.toLowerCase() === name.toLowerCase());
+
+      const where = (str(input, "where") ?? "australia") as ExpenseCategory;
+      const startsOn = str(input, "counts_from");
+
+      if (found) {
+        const saved = await updateExpenseItem(orgId, found.id, {
+          name,
+          ...(amount !== null ? { weekly_amount: amount } : {}),
+          ...(str(input, "where") ? { category: where } : {}),
+          ...("counts_from" in input ? { starts_on: startsOn } : {}),
+          is_active: true,
+        });
+        return {
+          changed: saved.name,
+          per_week: saved.weekly_amount,
+          where: saved.category,
+          counts_from: saved.starts_on ?? "every week",
+          note: "Future weeks only. No week that has already closed moves.",
+        };
+      }
+
+      if (amount === null) throw new Error("Give the amount for a new cost");
+      const saved = await createExpenseItem(orgId, {
+        name,
+        weekly_amount: amount,
+        category: where,
+        starts_on: startsOn,
+      });
+      return {
+        added: saved.name,
+        per_week: saved.weekly_amount,
+        where: saved.category,
+        counts_from: saved.starts_on ?? "every week",
+      };
+    },
+  },
+
+  archive_weekly_expense: {
+    scope: "write",
+    description:
+      "Stop counting a fixed weekly cost, without deleting it. The right way to end a cost " +
+      "that really existed: the weeks that already closed keep it, because they paid it. " +
+      "Pass restore:true to bring it back. Args: name or expense_id, restore.",
+    schema: obj({
+      name: { type: "string" },
+      expense_id: { type: "string" },
+      restore: { type: "boolean" },
+    }),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const item = await expenseFor(orgId, input);
+      const active = input.restore === true;
+      await updateExpenseItem(orgId, item.id, { is_active: active });
+      return {
+        [active ? "counting_again" : "stopped"]: item.name,
+        note: active
+          ? "Counted in every open week again."
+          : "Open weeks stop counting it. Closed weeks keep what they paid.",
+      };
+    },
+  },
+
+  delete_weekly_expense: {
+    scope: "delete",
+    description:
+      "Delete a fixed weekly cost entered by mistake. For a cost that really existed and has " +
+      "ended, use archive_weekly_expense instead: deleting it takes it out of every OPEN " +
+      "week's total as if it had never been paid. Closed weeks are unaffected either way, " +
+      "since they froze their own costs. Confirm with the owner first.",
+    schema: obj({ name: { type: "string" }, expense_id: { type: "string" } }),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const item = await expenseFor(orgId, input);
+      await deleteExpenseItem(orgId, item.id);
+      return { deleted: item.name };
+    },
+  },
+
+  set_loan: {
+    scope: "write",
+    description:
+      "Add a loan, or change one. `owed` is what was borrowed in the first place, not what is " +
+      "left: the balance is worked out from the payments recorded against it, so it is never " +
+      "typed in. `weekly` is what comes out for it in a normal week, which is counted in the " +
+      "week's outgoings. Args: name (required), owed, weekly, started_on, ends_on, notes, " +
+      "loan_id (to change one).",
+    schema: obj(
+      {
+        name: { type: "string" },
+        owed: { type: "number", description: "The original amount borrowed." },
+        weekly: { type: "number" },
+        started_on: DATE,
+        ends_on: DATE,
+        notes: { type: "string" },
+        loan_id: { type: "string" },
+      },
+      ["name"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const name = need(input, "name");
+      const owed = num(input, "owed");
+      const weekly = num(input, "weekly");
+      if (owed !== null && owed < 0) throw new Error("A loan cannot be negative");
+      if (weekly !== null && weekly < 0) {
+        throw new Error("A weekly payment cannot be negative");
+      }
+
+      const loans = await listLoans(orgId);
+      const id = str(input, "loan_id");
+      const found =
+        (id ? loans.find((l) => l.id === id) : undefined) ??
+        loans.find((l) => l.name.toLowerCase() === name.toLowerCase());
+
+      if (found) {
+        const saved = await updateLoan(orgId, found.id, {
+          name,
+          ...(owed !== null ? { principal: owed } : {}),
+          ...(weekly !== null ? { weekly_payment: weekly } : {}),
+          ...(str(input, "started_on")
+            ? { started_on: str(input, "started_on") }
+            : {}),
+          ...(str(input, "ends_on") ? { ends_on: str(input, "ends_on") } : {}),
+          ...(str(input, "notes") ? { notes: str(input, "notes") } : {}),
+          is_active: true,
+        });
+        const after = (await listLoans(orgId)).find((l) => l.id === saved.id);
+        return {
+          changed: saved.name,
+          borrowed: saved.principal,
+          paid: after?.paid,
+          still_owed: after?.balance,
+          per_week: saved.weekly_payment,
+        };
+      }
+
+      if (owed === null) throw new Error("Give the amount borrowed for a new loan");
+      const saved = await createLoan(orgId, {
+        name,
+        principal: owed,
+        weekly_payment: weekly ?? 0,
+        started_on: str(input, "started_on"),
+        ends_on: str(input, "ends_on"),
+        notes: str(input, "notes"),
+      });
+      return {
+        added: saved.name,
+        borrowed: saved.principal,
+        per_week: saved.weekly_payment,
+        note: "The balance follows the payments recorded against it.",
+      };
+    },
+  },
+
+  archive_loan: {
+    scope: "write",
+    description:
+      "Put a loan away without deleting it: settled, written off, or no longer tracked. Its " +
+      "payments stay. Pass restore:true to bring it back. Args: name or loan_id, restore.",
+    schema: obj({
+      name: { type: "string" },
+      loan_id: { type: "string" },
+      restore: { type: "boolean" },
+    }),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const loan = await loanFor(orgId, input);
+      const active = input.restore === true;
+      await updateLoan(orgId, loan.id, { is_active: active });
+      return { [active ? "tracking_again" : "archived"]: loan.name };
+    },
+  },
+
+  delete_loan: {
+    scope: "delete",
+    description:
+      "Delete a loan AND every payment recorded against it. For a loan that was really paid " +
+      "off, archive_loan is the right tool: deleting it erases the record of the money that " +
+      "went into it. Confirm with the owner first. Args: name or loan_id.",
+    schema: obj({ name: { type: "string" }, loan_id: { type: "string" } }),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const loan = await loanFor(orgId, input);
+      const payments = await listLoanPayments(orgId, loan.id);
+      await deleteLoan(orgId, loan.id);
+      return { deleted: loan.name, payments_deleted: payments.length };
+    },
+  },
+
+  delete_loan_payment: {
+    scope: "delete",
+    description:
+      "Remove a loan payment entered wrongly. The balance follows the payments, so it corrects " +
+      "itself. If the payment came out of a vault, that money returns to the vault as well. " +
+      "Get the id from loans_status. Args: payment_id.",
+    schema: obj({ payment_id: { type: "string" } }, ["payment_id"]),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      await deleteLoanPayment(orgId, need(input, "payment_id"));
+      return { deleted: true };
+    },
+  },
+
+  set_client_rhythm: {
+    scope: "write",
+    description:
+      "How often a client is done, how they pay, and where they sit in the two-week rotation. " +
+      "The rotation PRE-FILLS a week, it does not decide what happened: moving somebody here " +
+      "changes the weeks still to come, never one that has already run. " +
+      "`pays` is invoice (a document, into the account), transfer (into the account, no " +
+      "document) or cash (in hand); only an invoice client can ever be billed. " +
+      "`every` is weekly, fortnightly, monthly, every_n_weeks (with every_weeks) or " +
+      "occasional. Monthly and every-N-week clients are NOT on the rotation: their next visit " +
+      "is counted from the last one actually done. " +
+      "For the rotation, `week_1` and `week_2` each take a weekday (Monday..Sunday or 1..7), " +
+      "\"any\" for in the week with no day chosen yet, or \"out\" to take them out of it. " +
+      "Args: client (name, required), pays, every, every_weeks, rate, week_1, week_2.",
+    schema: obj(
+      {
+        client: { type: "string" },
+        client_id: { type: "string" },
+        pays: { type: "string", enum: ["invoice", "transfer", "cash"] },
+        every: {
+          type: "string",
+          enum: [
+            "weekly",
+            "fortnightly",
+            "monthly",
+            "every_n_weeks",
+            "occasional",
+          ],
+        },
+        every_weeks: { type: "number" },
+        rate: { type: "number", description: "What they are charged a visit." },
+        week_1: { type: "string" },
+        week_2: { type: "string" },
+      },
+      ["client"],
+    ),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const client = await clientFor(orgId, input);
+
+      const pays = str(input, "pays") as BillingType | null;
+      const every = str(input, "every") as Cadence | null;
+      const everyWeeks = num(input, "every_weeks");
+      const rate = num(input, "rate");
+
+      if (every === "every_n_weeks" && (everyWeeks === null || everyWeeks < 2)) {
+        throw new Error('every_n_weeks needs every_weeks, 2 or more');
+      }
+
+      if (pays || every || rate !== null || everyWeeks !== null) {
+        await updateClient(orgId, client.id, {
+          ...(pays ? { billing_type: pays } : {}),
+          ...(every ? { cadence: every } : {}),
+          ...(everyWeeks !== null ? { cadence_weeks: everyWeeks } : {}),
+          ...(rate !== null ? { default_rate: rate } : {}),
+        });
+      }
+
+      // The two rotation weeks are independent, so each is set on its own.
+      for (const week of [1, 2] as const) {
+        const raw = str(input, `week_${week}`);
+        if (raw === null) continue;
+        const word = raw.toLowerCase();
+        if (word === "out" || word === "remove" || word === "no") {
+          await setClientRotation(orgId, client.id, week, false, null);
+          continue;
+        }
+        const day = word === "any" ? null : dayNumber({ d: raw }, "d");
+        await setClientRotation(orgId, client.id, week, true, day);
+      }
+
+      const after = (await listClients(orgId)).find((c) => c.id === client.id);
+      return {
+        client: client.name,
+        pays: after?.billing_type,
+        every: after?.cadence,
+        every_weeks: after?.cadence_weeks,
+        rate: after?.default_rate,
+        week_1: after?.in_week_1
+          ? weekdayLabel(after.week_1_day ?? null)
+          : "not in week 1",
+        week_2: after?.in_week_2
+          ? weekdayLabel(after.week_2_day ?? null)
+          : "not in week 2",
+        note: "Weeks still to come are pre-filled from this. Weeks already run do not move.",
+      };
+    },
+  },
+
+  delete_week_job: {
+    scope: "delete",
+    description:
+      "Remove a line from a week entirely, for one added by mistake. Work that was simply not " +
+      "done is `mark_service` with done:false instead, which keeps the line and the record " +
+      "that it was cancelled. A line that follows an invoice comes back the next time the " +
+      "week is read, because the invoice is what put it there. Args: entry_id.",
+    schema: obj({ entry_id: { type: "string" } }, ["entry_id"]),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      const id = need(input, "entry_id");
+      const entry = await getEntry(orgId, id);
+      if (!entry) throw new Error("That line does not exist");
+      await deleteEntry(orgId, id);
+      return { deleted: entry.client_name };
+    },
+  },
+
+  delete_week_cost: {
+    scope: "delete",
+    description:
+      "Undo something recorded on ONE week's costs: an amount that was different that week, " +
+      "or a one-off. The standing list is untouched, so the week goes back to costing what a " +
+      "normal week costs. Get the id from savings_week. Args: cost_id.",
+    schema: obj({ cost_id: { type: "string" } }, ["cost_id"]),
+    handler: async (input, ctx) => {
+      const orgId = ctx.agent.orgId;
+      await deleteWeekExpense(orgId, need(input, "cost_id"));
+      return { deleted: true };
     },
   },
 };

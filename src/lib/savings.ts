@@ -2,6 +2,7 @@ import type {
   BillingType,
   Client,
   ExpenseCategory,
+  ExpenseItem,
   PaymentMethod,
 } from "@/lib/types";
 
@@ -22,6 +23,26 @@ export const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
 
 export function categoryLabel(value: ExpenseCategory): string {
   return EXPENSE_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+/**
+ * Whether a standing cost applies to a week, given the day that week ends.
+ *
+ * A cost with no start date has always been there: every week pays it. One with
+ * a date is paid from the week that date falls in onwards, which is why the
+ * comparison is against the week's LAST day: a cost that started on the
+ * Wednesday belongs to that week, not to the next one.
+ *
+ * It lives here, in the shared vocabulary, because the week's figures, the
+ * week's panel and the snapshot written at close all have to agree, and three
+ * copies of one comparison is how they stop agreeing.
+ */
+export function appliesToWeek(
+  item: Pick<ExpenseItem, "is_active" | "starts_on">,
+  weekEnd: string,
+): boolean {
+  if (!item.is_active) return false;
+  return !item.starts_on || item.starts_on <= weekEnd;
 }
 
 /**
@@ -178,4 +199,14 @@ export function aud(amount: number): string {
   const rounded = Math.round(amount * 100) / 100;
   const format = Number.isInteger(rounded) ? WHOLE : WITH_CENTS;
   return `AUD ${format.format(rounded)}`;
+}
+
+/**
+ * Colombian pesos, whole, with the thousands separated.
+ *
+ * Only ever shown beside the AUD figure it came from, never totalled with one:
+ * a vault balance is one currency or it is nothing.
+ */
+export function cop(amount: number): string {
+  return `COP ${WHOLE.format(Math.round(amount))}`;
 }

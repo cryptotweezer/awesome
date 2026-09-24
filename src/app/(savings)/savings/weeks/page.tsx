@@ -131,16 +131,31 @@ export default async function WeeksPage() {
                   <td className="px-4 py-3 text-right text-rose-400 dark:text-rose-400/90">
                     {aud(r.expenses_total)}
                   </td>
+                  {/* Green when the week made its target, red when it did not,
+                      and the target goes green with it: the question is whether
+                      the two met, and colouring one says half of it. Only for a
+                      CLOSED week: an open one has not collected its money yet,
+                      and red on a Monday is a lie. */}
                   <td
                     className={`px-4 py-3 text-right font-semibold ${
-                      r.saved < 0
-                        ? "text-red-600 dark:text-red-400"
-                        : "text-slate-900 dark:text-slate-100"
+                      r.state !== "closed"
+                        ? r.saved < 0
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-slate-900 dark:text-slate-100"
+                        : r.saved >= r.target
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-red-600 dark:text-red-400"
                     }`}
                   >
                     {aud(r.saved)}
                   </td>
-                  <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">
+                  <td
+                    className={`px-4 py-3 text-right ${
+                      r.state === "closed" && r.saved >= r.target
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-slate-500 dark:text-slate-400"
+                    }`}
+                  >
                     {aud(r.target)}
                   </td>
                   <td

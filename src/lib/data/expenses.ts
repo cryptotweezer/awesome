@@ -33,6 +33,8 @@ export type ExpenseItemInput = {
   name: string;
   weekly_amount: number;
   category: ExpenseCategory;
+  /** Null for a cost that has always been there. A date starts it from there. */
+  starts_on: string | null;
 };
 
 export async function createExpenseItem(

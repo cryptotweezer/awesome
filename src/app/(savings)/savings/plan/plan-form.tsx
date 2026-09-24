@@ -1,8 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
 import { aud, shortDate } from "@/lib/savings";
+import type { Milestone } from "@/lib/data/savings-progress";
+import { MilestoneCards } from "./milestones";
 import {
+  archivePlanAction,
   deletePlanAction,
   extendPlanAction,
   savePlanAction,
@@ -11,6 +15,18 @@ import {
 } from "./actions";
 
 const initial: ActionState = { ok: false };
+
+/** One week of a plan, enough to list it and open it. */
+export type PlanWeek = {
+  id: string;
+  week_start: string;
+  week_end: string;
+  closed: boolean;
+  /** Confirmed at close. Null while the week is still open. */
+  saved: number | null;
+  /** What that week asked for: its own frozen target, or the plan's. */
+  target: number;
+};
 
 /** What a plan came to, worked out on the server from its own weeks. */
 export type PlanResult = {
@@ -24,12 +40,36 @@ export type PlanResult = {
   weeks_opened: number;
   weeks_closed: number;
   saved: number;
+  /** What left the vault while this plan ran: withdrawals, vault-paid loans. */
+  taken_out: number;
+  /** saved - taken_out. What the plan put away AND kept. */
+  net_saved: number;
   target_total: number;
   percent: number;
   met: boolean;
   finished: boolean;
+  /** Filed away by the owner. Its dates are still taken, forever. */
+  archived: boolean;
   notes: string | null;
+  /** Its weeks, newest first, for the list that opens under it. */
+  weeks: PlanWeek[];
+  /** Its own stretches, so a finished plan can be opened and read like a live one. */
+  milestones: Milestone[];
 };
+
+/**
+ * How long a plan runs, said the way a person would say it.
+ *
+ * "1 months, 4 weeks" is two facts and a grammatical error where one fact was
+ * wanted. The weeks are on the panel below already, so the length is enough.
+ */
+export function durationLabel(months: number): string {
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return years === 1 ? "1 year" : `${years} years`;
+  }
+  return months === 1 ? "1 month" : `${months} months`;
+}
 
 /**
  * The plan as it stands, the form when it is wanted, and everything before it.
@@ -45,9 +85,9 @@ export function PlanPanel({
   history,
   today,
 }: {
-  /** The plan running today, with its progress. Null between plans. */
+  /** The plan on screen: the one running, or the last one not yet filed away. */
   current: PlanResult | null;
-  /** Every plan whose last week has gone by, newest first. */
+  /** The plans before it, used only to know where the next one may start. */
   history: PlanResult[];
   today: string;
 }) {
@@ -77,8 +117,6 @@ export function PlanPanel({
           onEdit={() => setEditing(true)}
         />
       )}
-
-      {history.length > 0 && <History rows={history} />}
     </div>
   );
 }
@@ -126,7 +164,7 @@ function CurrentPlan({
               </span>
             </p>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {plan.horizon_months} months, {plan.total_weeks} weeks, coming to{" "}
+              {durationLabel(plan.horizon_months)}, coming to{" "}
               <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {aud(plan.target_total)}
               </span>
@@ -140,24 +178,59 @@ function CurrentPlan({
           </button>
         </div>
 
-        <dl className="mt-5 grid gap-4 border-t border-slate-100 pt-4 text-sm dark:border-slate-800 sm:grid-cols-4">
+        {/* How far along the whole plan is, in one bar. The figures above say
+            what it asks for; this says how much of it is done. */}
+        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {aud(plan.net_saved)}
+              <span className="ml-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                of {aud(plan.target_total)}
+              </span>
+            </p>
+            <p
+              className={`text-sm font-bold ${
+                plan.met
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-slate-900 dark:text-slate-100"
+              }`}
+            >
+              {plan.percent}%
+            </p>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+            <div
+              className={`h-full rounded-full ${
+                plan.met ? "bg-emerald-500" : "bg-sky-500"
+              }`}
+              style={{ width: `${Math.max(0, Math.min(100, plan.percent))}%` }}
+            />
+          </div>
+        </div>
+
+        <dl className="mt-5 grid gap-4 border-t border-slate-100 pt-4 text-sm dark:border-slate-800 sm:grid-cols-3">
           <Field label="Week 1 starts" value={shortDate(plan.starts_on)} />
           <Field label="Last week ends" value={shortDate(plan.ends_on)} />
+          {/* What is really in the vault from this plan: every week it closed,
+              less anything taken back out while it was running. Money sent to
+              Colombia is still saved, so it is not deducted here. */}
           <Field
-            label="Weeks"
-            value={`${plan.weeks_closed} closed of ${plan.weeks_opened} open, ${plan.total_weeks} planned`}
+            label="Total saved"
+            value={aud(plan.net_saved)}
+            note={
+              plan.taken_out > 0
+                ? `${aud(plan.saved)} put away, ${aud(plan.taken_out)} taken out`
+                : undefined
+            }
           />
-          <Field label="Notes" value={plan.notes || "–"} />
         </dl>
       </div>
 
+      <PlanWeeks weeks={plan.weeks} weeklyTarget={plan.weekly_target} />
+
       {plan.finished && <Finished plan={plan} />}
 
-      <DeletePlan
-        id={plan.id}
-        weeks={plan.weeks_opened}
-        closed={plan.weeks_closed}
-      />
+      <DeletePlan plan={plan} />
     </div>
   );
 }
@@ -170,74 +243,147 @@ function CurrentPlan({
  * it. There are two honest ways on, and this says both.
  */
 function Finished({ plan }: { plan: PlanResult }) {
-  const [state, action, pending] = useActionState(extendPlanAction, initial);
+  // Two buttons and nothing else until one is pressed. The paragraph that used
+  // to explain both choices was longer than either of them.
+  const [mode, setMode] = useState<null | "file" | "extend">(null);
+
+  const tone = plan.met
+    ? "bg-emerald-50 ring-emerald-200 dark:bg-emerald-950/30 dark:ring-emerald-900"
+    : "bg-amber-50 ring-amber-200 dark:bg-amber-950/30 dark:ring-amber-900";
+  const text = plan.met
+    ? "text-emerald-900 dark:text-emerald-200"
+    : "text-amber-900 dark:text-amber-200";
 
   return (
-    <div
-      className={`space-y-3 rounded-2xl p-5 ring-1 ${
-        plan.met
-          ? "bg-emerald-50 ring-emerald-200 dark:bg-emerald-950/30 dark:ring-emerald-900"
-          : "bg-amber-50 ring-amber-200 dark:bg-amber-950/30 dark:ring-amber-900"
-      }`}
-    >
-      <h3
-        className={`text-sm font-semibold ${
-          plan.met
-            ? "text-emerald-900 dark:text-emerald-200"
-            : "text-amber-900 dark:text-amber-200"
-        }`}
-      >
-        {plan.met
-          ? `This plan is done, and you made it: ${aud(plan.saved)} of ${aud(
-              plan.target_total,
-            )}.`
-          : `This plan reached its last week at ${aud(plan.saved)} of ${aud(
-              plan.target_total,
-            )}, ${plan.percent}%.`}
-      </h3>
-      <p
-        className={`text-xs ${
-          plan.met
-            ? "text-emerald-900/80 dark:text-emerald-200/80"
-            : "text-amber-900/80 dark:text-amber-200/80"
-        }`}
-      >
-        Start the next plan and this one moves to the history with that result.
-        Or keep it running longer, if the money is still coming in.
-      </p>
-      <form action={action} className="flex flex-wrap items-end gap-2">
-        <input type="hidden" name="id" value={plan.id} />
-        <label className="block">
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Keep going, months
-          </span>
-          <input
-            name="months"
-            type="number"
-            min="1"
-            max="120"
-            defaultValue="3"
-            className="input w-24"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-        >
-          {pending ? "…" : "Extend"}
-        </button>
-        {state.error && (
-          <span className="text-xs text-red-600 dark:text-red-400">
-            {state.error}
-          </span>
+    <div className={`space-y-3 rounded-2xl p-5 ring-1 ${tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className={`text-sm font-semibold ${text}`}>
+          {plan.met
+            ? `Done, and you made it: ${aud(plan.net_saved)} of ${aud(
+                plan.target_total,
+              )}.`
+            : `Done at ${aud(plan.net_saved)} of ${aud(plan.target_total)}, ${
+                plan.percent
+              }%.`}
+        </h3>
+
+        {mode === null && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setMode("file")}
+              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+            >
+              File it away
+            </button>
+            <button
+              onClick={() => setMode("extend")}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Keep it going
+            </button>
+          </div>
         )}
-      </form>
+      </div>
+
+      {mode === "file" && (
+        <FileAway plan={plan} onCancel={() => setMode(null)} />
+      )}
+      {mode === "extend" && (
+        <KeepGoing plan={plan} onCancel={() => setMode(null)} />
+      )}
     </div>
   );
 }
 
-// -- starting the next one --------------------------------------------------
+/** File it away: the history keeps it, and the page offers the next plan. */
+function FileAway({
+  plan,
+  onCancel,
+}: {
+  plan: PlanResult;
+  onCancel: () => void;
+}) {
+  const [state, action, pending] = useActionState(archivePlanAction, initial);
+
+  return (
+    <form action={action} className="flex flex-wrap items-center gap-3">
+      <input type="hidden" name="id" value={plan.id} />
+      <p className="text-xs text-slate-600 dark:text-slate-400">
+        Its weeks and its result stay as they are. The next plan starts after{" "}
+        {shortDate(plan.ends_on)}.
+      </p>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+      >
+        {pending ? "\u2026" : "File it away"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="text-xs font-medium text-slate-500 hover:underline dark:text-slate-400"
+      >
+        Cancel
+      </button>
+      {state.error && (
+        <span className="text-xs text-red-600 dark:text-red-400">
+          {state.error}
+        </span>
+      )}
+    </form>
+  );
+}
+
+/** Keep it going: more months on the same plan, if the money is still coming. */
+function KeepGoing({
+  plan,
+  onCancel,
+}: {
+  plan: PlanResult;
+  onCancel: () => void;
+}) {
+  const [state, action, pending] = useActionState(extendPlanAction, initial);
+
+  return (
+    <form action={action} className="flex flex-wrap items-end gap-2">
+      <input type="hidden" name="id" value={plan.id} />
+      <label className="block">
+        <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          More months
+        </span>
+        <input
+          name="months"
+          type="number"
+          min="1"
+          max="120"
+          defaultValue="3"
+          autoFocus
+          className="input w-24"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+      >
+        {pending ? "\u2026" : "Extend"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="pb-2 text-xs font-medium text-slate-500 hover:underline dark:text-slate-400"
+      >
+        Cancel
+      </button>
+      {state.error && (
+        <span className="pb-2 text-xs text-red-600 dark:text-red-400">
+          {state.error}
+        </span>
+      )}
+    </form>
+  );
+}
 
 function StartPlan({
   today,
@@ -394,7 +540,9 @@ export function PlanForm({
           />
           {earliest && (
             <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">
-              The last plan ended {shortDate(earliest)}
+              The last plan ended {shortDate(earliest)}, so this one starts after
+              it. Filing a plan away does not free its dates: two plans can never
+              cover the same week.
             </span>
           )}
         </label>
@@ -456,7 +604,7 @@ export function PlanForm({
  * from that plan's own weeks, every one of which froze what it saved as it
  * closed, so a finished plan's result cannot move afterwards.
  */
-function History({ rows }: { rows: PlanResult[] }) {
+export function PlanHistory({ rows }: { rows: PlanResult[] }) {
   const made = rows.filter((r) => r.met).length;
 
   return (
@@ -480,17 +628,47 @@ function History({ rows }: { rows: PlanResult[] }) {
               <th className="px-4 py-3 text-right font-medium">Target</th>
               <th className="px-4 py-3 text-right font-medium">Saved</th>
               <th className="px-4 py-3 text-right font-medium">Of target</th>
+              <th className="px-4 py-3 text-right font-medium" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {rows.map((r) => (
-              <tr key={r.id}>
+              <HistoryRow key={r.id} plan={r} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * One plan that has been and gone, and everything it was, one click down.
+ *
+ * A finished plan is not a number, it is a stretch of weeks that went some way
+ * or another, so it opens the same two things the live plan shows: its weeks,
+ * green or red against their target, and its own milestones.
+ */
+function HistoryRow({ plan: r }: { plan: PlanResult }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <tr
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "Hide this plan" : "Show its weeks and milestones"}
+        className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
+      >
                 <td className="px-4 py-3">
+                  <span className="mr-1 text-slate-400 dark:text-slate-500">
+                    {open ? "▾" : "▸"}
+                  </span>
                   <span className="font-medium text-slate-900 dark:text-slate-100">
-                    {r.name || `${r.horizon_months} months`}
+                    {r.name || durationLabel(r.horizon_months)}
                   </span>
                   <div className="text-[11px] text-slate-400 dark:text-slate-500">
                     {shortDate(r.starts_on)} to {shortDate(r.ends_on)}
+                    {r.archived && " · filed away"}
                     {r.notes && ` · ${r.notes}`}
                   </div>
                 </td>
@@ -519,23 +697,200 @@ function History({ rows }: { rows: PlanResult[] }) {
                     {r.percent}%
                   </span>
                 </td>
+                <td className="px-4 py-3 text-right">
+                  {r.archived && <RestorePlan id={r.id} />}
+                </td>
+      </tr>
+
+      {open && (
+        <tr>
+          <td colSpan={7} className="bg-slate-50 px-4 py-4 dark:bg-slate-950/40">
+            <div className="space-y-4">
+              <MilestoneCards milestones={r.milestones} compact />
+              <PlanWeeks weeks={r.weeks} weeklyTarget={r.weekly_target} />
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * The plan's own weeks, folded away until they are asked for.
+ *
+ * Open by default it would be a wall of rows on top of the figures that
+ * summarise it. Folded, it is the answer to the one question the summary cannot
+ * answer: which weeks made their target and which did not. Green and red, and a
+ * click straight into the week.
+ */
+function PlanWeeks({
+  weeks,
+  weeklyTarget,
+}: {
+  weeks: PlanWeek[];
+  weeklyTarget: number;
+}) {
+  const [open, setOpen] = useState(false);
+  if (weeks.length === 0) return null;
+
+  const closed = weeks.filter((w) => w.closed);
+  const met = closed.filter((w) => (w.saved ?? 0) >= w.target).length;
+
+  return (
+    <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-wrap items-baseline justify-between gap-3 px-5 py-3 text-left"
+      >
+        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          {open ? "▾" : "▸"} The weeks of this plan
+          <span className="ml-2 text-xs font-normal text-slate-400 dark:text-slate-500">
+            {weeks.length}
+          </span>
+        </span>
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          {closed.length === 0 ? (
+            "None closed yet"
+          ) : (
+            <>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                {met}
+              </span>{" "}
+              on target ·{" "}
+              <span className="font-semibold text-red-600 dark:text-red-400">
+                {closed.length - met}
+              </span>{" "}
+              under
+            </>
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <div className="overflow-x-auto border-t border-slate-100 dark:border-slate-800">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              <tr>
+                <th className="px-4 py-2 font-medium">Week</th>
+                <th className="px-4 py-2 text-right font-medium">Saved</th>
+                <th className="px-4 py-2 text-right font-medium">Target</th>
+                <th className="px-4 py-2 text-right font-medium">Against</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {weeks.map((w) => {
+                const target = w.target || weeklyTarget;
+                const saved = w.saved;
+                const madeIt = saved !== null && saved >= target;
+                return (
+                  <tr
+                    key={w.id}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/savings/weeks/${w.id}`}
+                        className="font-medium text-slate-900 hover:underline dark:text-slate-100"
+                      >
+                        {shortDate(w.week_start)} to {shortDate(w.week_end)}
+                      </Link>
+                      {!w.closed && (
+                        <span className="ml-2 text-[11px] text-slate-400 dark:text-slate-500">
+                          still open
+                        </span>
+                      )}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right font-semibold ${
+                        saved === null
+                          ? "text-slate-400 dark:text-slate-500"
+                          : madeIt
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {saved === null ? "–" : aud(saved)}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right ${
+                        madeIt
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-slate-500 dark:text-slate-400"
+                      }`}
+                    >
+                      {aud(target)}
+                    </td>
+                    <td
+                      className={`px-4 py-2 text-right ${
+                        saved === null
+                          ? "text-slate-400 dark:text-slate-500"
+                          : madeIt
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {saved === null
+                        ? "–"
+                        : `${saved - target >= 0 ? "+" : ""}${aud(saved - target)}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Taking a filed plan back out.
+ *
+ * Nothing is lost either way: the weeks, the figures and the result stay where
+ * they are. All this decides is whether the plan is the one on screen.
+ */
+function RestorePlan({ id }: { id: string }) {
+  const [state, action, pending] = useActionState(archivePlanAction, initial);
+
+  return (
+    <form action={action} className="inline">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="archived" value="false" />
+      <button
+        type="submit"
+        disabled={pending}
+        title={state.error ?? "Put it back at the top of the page"}
+        className="rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+      >
+        {pending ? "…" : "Take back out"}
+      </button>
+    </form>
   );
 }
 
 // -- small pieces -----------------------------------------------------------
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+}) {
   return (
     <div>
       <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {label}
       </dt>
+      {note && (
+        <dd className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+          {note}
+        </dd>
+      )}
       <dd className="mt-0.5 font-medium text-slate-900 dark:text-slate-100">
         {value}
       </dd>
@@ -550,18 +905,19 @@ function Field({ label, value }: { label: string; value: string }) {
  * is the only thing that tells somebody whether this is a test being cleared or
  * a year of history. Invoices are not part of a plan and do not move.
  */
-function DeletePlan({
-  id,
-  weeks,
-  closed,
-}: {
-  id: string;
-  weeks: number;
-  closed: number;
-}) {
+function DeletePlan({ plan }: { plan: PlanResult }) {
   const [state, action, pending] = useActionState(deletePlanAction, initial);
   const [open, setOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [force, setForce] = useState(false);
+
+  // What a mis-click would cost: this plan's closed weeks are part of Vault
+  // AUS, and deleting them takes that money out of the balance with nothing
+  // left to point at. So the panel says the figure, and the name has to be
+  // typed before the button does anything.
+  const expected = plan.name || "DELETE";
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim().toLowerCase() === expected.toLowerCase();
 
   if (!open) {
     return (
@@ -579,28 +935,40 @@ function DeletePlan({
       action={action}
       className="space-y-3 rounded-2xl bg-red-50 p-5 ring-1 ring-red-200 dark:bg-red-950/30 dark:ring-red-900"
     >
-      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="id" value={plan.id} />
+      <input type="hidden" name="expected_name" value={expected} />
       <h3 className="text-sm font-semibold text-red-900 dark:text-red-200">
         Delete the plan and start again
       </h3>
       <p className="text-xs text-red-900/80 dark:text-red-200/80">
         This deletes the plan and{" "}
         <span className="font-semibold">
-          {weeks} {weeks === 1 ? "week" : "weeks"}
+          {plan.weeks_opened} {plan.weeks_opened === 1 ? "week" : "weeks"}
         </span>
-        {closed > 0 && (
+        {plan.weeks_closed > 0 && (
           <>
             {" "}
-            (<span className="font-semibold">{closed} closed</span>)
+            (<span className="font-semibold">{plan.weeks_closed} closed</span>)
           </>
         )}
         , with everything recorded on them: the work, the payments and the costs
         of each week. It cannot be undone.
       </p>
+
+      {plan.saved > 0 && (
+        <p className="rounded-lg bg-red-100 px-3 py-2 text-xs font-medium text-red-900 dark:bg-red-950/60 dark:text-red-200">
+          Those weeks put {aud(plan.saved)} into Vault AUS. The vault keeps no
+          balance of its own, so deleting them takes that straight back out of
+          it. Everything else in the vault, the transfers to Colombia and what
+          was taken out, stays exactly as it is.
+        </p>
+      )}
+
       <p className="text-xs text-red-900/80 dark:text-red-200/80">
         Your clients and their rotation, the fixed expenses, the loans and every
         invoice stay exactly as they are.
       </p>
+
       <label className="flex items-center gap-2 text-xs font-medium text-red-900 dark:text-red-200">
         <input
           type="checkbox"
@@ -612,6 +980,37 @@ function DeletePlan({
         />
         I understand those weeks go too
       </label>
+
+      <label className="block text-xs font-medium text-red-900 dark:text-red-200">
+        <span className="mb-1 block">
+          Type <span className="font-bold">{expected}</span> to confirm
+        </span>
+        <input
+          name="typed_name"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          autoComplete="off"
+          className="input max-w-xs"
+        />
+      </label>
+
+      {/* Only shown once the server has refused: it means the vault would be
+          left holding less than nothing, which is always a mistake unless it
+          is deliberate. */}
+      {state.error && state.error.includes("second box") && (
+        <label className="flex items-center gap-2 text-xs font-medium text-red-900 dark:text-red-200">
+          <input
+            type="checkbox"
+            name="force"
+            value="true"
+            checked={force}
+            onChange={(e) => setForce(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Delete it anyway, and leave the vault short
+        </label>
+      )}
+
       {state.error && (
         <p className="text-xs font-medium text-red-700 dark:text-red-300">
           {state.error}
@@ -621,16 +1020,16 @@ function DeletePlan({
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-100 dark:border-red-900 dark:text-red-200 dark:hover:bg-red-950/60"
+          className="rounded-lg border border-red-300 px-4 py-2 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/60"
         >
-          Cancel
+          Keep it
         </button>
         <button
           type="submit"
-          disabled={pending || !confirmed}
-          className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+          disabled={pending || !confirmed || !matches}
+          className="rounded-lg bg-red-600 px-4 py-2 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
         >
-          {pending ? "Deleting…" : "Delete the plan"}
+          {pending ? "Deleting\u2026" : "Delete the plan"}
         </button>
       </div>
     </form>

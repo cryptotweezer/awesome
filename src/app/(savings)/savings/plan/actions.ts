@@ -2,12 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  archivePlan,
   deletePlan,
+  forgetDeletedPlan,
   getPlan,
+  restorePlan,
   startPlan,
   updatePlan,
 } from "@/lib/data/savings-plan";
-import { AWESOME_ORG_ID, requireOrg } from "@/lib/data/org";
+import { AWESOME_ORG_ID, requireOrg, signatureFor } from "@/lib/data/org";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -142,11 +145,37 @@ export async function extendPlanAction(
 }
 
 /**
+ * File a finished plan away, or take it back out.
+ *
+ * Archiving is a decision, not a date: a plan whose last date has passed stays
+ * on screen until its weeks have closed and the owner says it is settled. Only
+ * then does the page offer to start the next one.
+ */
+export async function archivePlanAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = str(formData, "id");
+  if (!id) return { ok: false, error: "Missing plan." };
+  const archived = formData.get("archived") !== "false";
+  try {
+    const { org } = await awesome();
+    await archivePlan(org.id, id, archived);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+  }
+  return done();
+}
+
+/**
  * Delete a plan and every week under it.
  *
- * `confirm` is required because the button alone is not enough: the person has
- * to have read what goes. Nothing about the clients, the rotation, the
- * expenses, the loans or the invoices is part of a plan.
+ * Three things have to line up, because this is the one action in the savings
+ * half that destroys money already counted: the box has to be ticked, the
+ * plan's name has to be typed out, and the vault is not allowed to end up
+ * holding less than nothing unless that is asked for on purpose. Nothing about
+ * the clients, the rotation, the expenses, the loans or the invoices is part of
+ * a plan.
  */
 export async function deletePlanAction(
   _prev: ActionState,
@@ -157,9 +186,48 @@ export async function deletePlanAction(
   if (formData.get("confirm") !== "true") {
     return { ok: false, error: "Tick the box to confirm." };
   }
+
+  // Typing it out is the difference between a mis-click and a decision. The
+  // word is the plan's own name, or DELETE for a plan that was never named.
+  const expected = str(formData, "expected_name") ?? "DELETE";
+  const typed = str(formData, "typed_name");
+  if ((typed ?? "").toLowerCase() !== expected.toLowerCase()) {
+    return {
+      ok: false,
+      error: `Type ${expected} to confirm. Nothing is deleted until you do.`,
+    };
+  }
+
+  try {
+    const { org, member } = await awesome();
+    await deletePlan(org.id, id, {
+      force: formData.get("force") === "true",
+      by: signatureFor(member),
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed." };
+  }
+  return done();
+}
+
+/**
+ * Put a deleted plan back, or empty it out of the bin early.
+ *
+ * The bin holds a deleted plan for thirty days and the daily cron clears it
+ * after that. Restoring is an insert: the plan, its weeks and everything
+ * recorded on them go back under their original ids.
+ */
+export async function restorePlanAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const id = str(formData, "id");
+  if (!id) return { ok: false, error: "Missing plan." };
+  const forget = formData.get("forget") === "true";
   try {
     const { org } = await awesome();
-    await deletePlan(org.id, id);
+    if (forget) await forgetDeletedPlan(org.id, id);
+    else await restorePlan(org.id, id);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed." };
   }

@@ -1,12 +1,18 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { todayInSydney } from "@/lib/format";
-import { isLongerCycle, methodFor, nextDueOn } from "@/lib/savings";
+import {
+  appliesToWeek,
+  isLongerCycle,
+  methodFor,
+  nextDueOn,
+} from "@/lib/savings";
 import { currentPlan, getPlan, weeksOf } from "@/lib/data/savings-plan";
 import type {
   ClientWithIssuer,
   CloseBlocker,
   ExpenseItem,
+  SavingsPlan,
   SavingsWeek,
   WeekDetail,
   WeekEntry,
@@ -364,8 +370,10 @@ export function figuresFor(
         .filter((x) => x.kind === "override" && x.expense_item_id)
         .map((x) => [x.expense_item_id as string, x.amount]),
     );
+    // Only the costs that had started by the end of this week. A cost added
+    // today with a start date must not appear in a week that ran before it.
     const standingTotal = standing
-      .filter((i) => i.is_active)
+      .filter((i) => appliesToWeek(i, week.week_end))
       .reduce((s, i) => s + (overrides.get(i.id) ?? i.weekly_amount), 0);
     const oneOffs = weekExpenses
       .filter((x) => x.kind === "oneoff")
@@ -373,6 +381,20 @@ export function figuresFor(
     expensesTotal = standingTotal + oneOffs;
     target = weeklyTarget;
   }
+
+  // Where the week's money comes from, read on the same lines as its headline
+  // income: a running week is read forwards, a closed one on what was done.
+  // Cash and a transfer are one side, because both are settled the week the
+  // work happens and both pay the bills; only an invoice has to wait.
+  const basis = week.closed_at
+    ? counted
+    : entries.filter((e) => e.status !== "skipped");
+  const cashIn = basis
+    .filter((e) => e.method !== "account")
+    .reduce((s, e) => s + e.amount + e.extra_amount, 0);
+  const invoicedIn = basis
+    .filter((e) => e.method === "account")
+    .reduce((s, e) => s + e.amount + e.extra_amount, 0);
 
   const saved = week.closed_at
     ? (week.saved_amount ?? 0)
@@ -388,10 +410,18 @@ export function figuresFor(
     received,
     outstanding: income - received,
     expenses_total: expensesTotal,
+    cash_in: cashIn,
+    invoiced_in: invoicedIn,
+    covered_by_cash: Math.min(cashIn, expensesTotal),
+    short_from_invoicing: Math.max(0, expensesTotal - cashIn),
+    cash_left: Math.max(0, cashIn - expensesTotal),
     saved,
-    // A closed week has nothing left to expect, so its surplus IS what it
-    // saved. An open one is read forwards.
-    surplus: week.closed_at ? saved : expectedIncome - expensesTotal,
+    // The excess the week worked out, which is NOT what it saved. A week can
+    // come out 328 ahead and have 200 confirmed into the vault, and both
+    // numbers have to survive the close: the excess is what the week was
+    // worth, `saved` is what really went away. Collapsing one into the other
+    // loses the only figure that says how much of it was spent.
+    surplus: expectedIncome - expensesTotal,
     target,
     against_target: saved - target,
   };
@@ -451,8 +481,10 @@ export async function getWeekDetail(
 export async function ensureWeeks(
   orgId: string,
   today = todayInSydney(),
+  /** The plan running today, when the caller has already read it. */
+  known?: SavingsPlan | null,
 ): Promise<SavingsWeek[]> {
-  const plan = await currentPlan(orgId, today);
+  const plan = known === undefined ? await currentPlan(orgId, today) : known;
   if (!plan) return listWeeks(orgId);
 
   const supabase = createAdminClient();
@@ -518,24 +550,64 @@ export async function ensureWeeks(
  *
  * A closed week is left alone.
  */
+/**
+ * The two reads that are identical for every week being synced.
+ *
+ * Bringing five weeks into step used to mean reading the client list and the
+ * last service dates five times each. They cannot differ between weeks of the
+ * same pass, so a caller with several weeks reads them once and hands them over.
+ */
+export type SyncContext = {
+  clients: ClientWithIssuer[];
+  lastDone: Map<string, string>;
+};
+
+export async function syncContext(orgId: string): Promise<SyncContext> {
+  const supabase = createAdminClient();
+  const [{ data: clientRows }, lastDone] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("*")
+      .eq("org_id", orgId)
+      .eq("is_active", true),
+    lastServiceDates(orgId),
+  ]);
+  return {
+    clients: (clientRows ?? []) as unknown as ClientWithIssuer[],
+    lastDone,
+  };
+}
+
+/** Bring several weeks into step, reading the shared part once. */
+export async function syncWeeks(
+  orgId: string,
+  weekIds: string[],
+  today = todayInSydney(),
+): Promise<void> {
+  if (weekIds.length === 0) return;
+  const ctx = weekIds.length > 1 ? await syncContext(orgId) : undefined;
+  await Promise.all(weekIds.map((id) => syncWeek(orgId, id, today, ctx)));
+}
+
 export async function syncWeek(
   orgId: string,
   weekId: string,
   today = todayInSydney(),
+  /** Shared reads, when a caller is syncing more than one week. */
+  shared?: SyncContext,
 ): Promise<void> {
   const week = await getWeek(orgId, weekId);
   if (!week || week.closed_at) return;
 
   const supabase = createAdminClient();
 
-  const [{ data: clientRows }, entries, billed, lastDone] = await Promise.all([
-    supabase.from("clients").select("*").eq("org_id", orgId).eq("is_active", true),
+  const [ctx, entries, billed] = await Promise.all([
+    shared ?? syncContext(orgId),
     listEntries(orgId, weekId),
     billedWorkIn(orgId, week),
-    lastServiceDates(orgId),
   ]);
 
-  const clients = (clientRows ?? []) as unknown as ClientWithIssuer[];
+  const { clients, lastDone } = ctx;
   const byClient = new Map(entries.map((e) => [e.client_id, e]));
   // Keyed by client so the rotation and the invoices cannot each insert a line
   // for the same person: one line per client per week is a constraint.
@@ -1104,7 +1176,10 @@ export async function closeWeek(
     .from("expense_items")
     .select("*")
     .eq("org_id", orgId)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    // A cost that had not started yet when this week ran is not part of what
+    // this week cost, so it is not frozen into it either.
+    .or(`starts_on.is.null,starts_on.lte.${detail.week.week_end}`);
   const overridden = new Set(
     detail.expenses
       .filter((x) => x.kind === "override")

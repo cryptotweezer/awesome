@@ -192,6 +192,14 @@ export interface ExpenseItem {
   weekly_amount: number;
   category: ExpenseCategory;
   is_active: boolean;
+  /**
+   * When this cost started, for one that has not always existed.
+   *
+   * Null means it has always been there, and every week counts it. A date means
+   * only the week it falls in and the ones after it pay for it, so adding a
+   * cost today cannot make a past week look as if it had been paying it.
+   */
+  starts_on: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -232,6 +240,15 @@ export interface LoanPayment {
   org_id: string;
   loan_id: string;
   amount: number;
+  /**
+   * Which vault paid for it, when one did.
+   *
+   * Null is the ordinary case: the weekly loan payment is part of what a week
+   * costs and the saving never sees it. A lump out of Vault AUS or COL to knock
+   * a loan down is recorded here, once, and the vault reads it from this column
+   * rather than keeping a movement of its own that could disagree.
+   */
+  from_vault: VaultName | null;
   paid_on: string;
   note: string | null;
   recorded_by: string | null;
@@ -263,6 +280,14 @@ export interface SavingsPlan {
   /** Read-only: the database works it out from the two above. */
   ends_on: string;
   notes: string | null;
+  /**
+   * Filed away by the owner once its last weeks had closed.
+   *
+   * Finished is derived from `ends_on` and always will be. This is the decision
+   * that follows it: until it is set, a finished plan stays on screen, because
+   * its last weeks usually close after its last date.
+   */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -396,15 +421,133 @@ export interface WeekDetail {
   /** Still to arrive: done but not paid. This is what keeps a week open. */
   outstanding: number;
   expenses_total: number;
+  /**
+   * The week's money split by where it lands, over the same lines the headline
+   * income is read on.
+   *
+   * `cash_in` is everything settled outside an invoice, so cash in hand AND a
+   * transfer straight into the account: both are there the week the work is
+   * done and both pay the bills. `invoiced_in` is the rest, which waits on an
+   * invoice being raised and paid.
+   */
+  cash_in: number;
+  invoiced_in: number;
+  /** Of the week's costs, how much the cash covers. */
+  covered_by_cash: number;
+  /** What the cash did not reach, so the invoicing has to carry it. */
+  short_from_invoicing: number;
+  /** Cash left once the costs are paid. Zero when the cash fell short. */
+  cash_left: number;
   /** income - expenses. The surplus, which is the saving. */
   saved: number;
-  /** expected_income - expenses. What is left over if the week goes to plan. */
+  /**
+   * expected_income - expenses. What the week is worth once everything is paid
+   * for, and never the same thing as `saved`: a week 328 ahead can put 200 in
+   * the vault. A closed week keeps both.
+   */
   surplus: number;
   target: number;
   /** saved - target. Negative is what the plan is owed for this week. */
   against_target: number;
   /** What stops this week closing: invoiced work not billed, or not paid. */
   blockers: CloseBlocker[];
+}
+
+/**
+ * The two vaults, both counted in AUD.
+ *
+ *   aus  every confirmed weekly saving lands here, and it is still spendable
+ *   col  what has been sent to Colombia, and is frozen
+ */
+export type VaultName = "aus" | "col";
+
+/**
+ * Money MOVING between or out of the vaults. What sits still is never stored:
+ * a balance is worked out from the weeks that closed and the movements here.
+ *
+ *   transfer    aus to col, carrying the rate of the day and the pesos that landed
+ *   withdrawal  out of a vault for something else, with its reason
+ *   deposit     in, and not from a week: replenishing, or outside money
+ */
+export type VaultMovementKind = "transfer" | "withdrawal" | "deposit";
+
+export interface VaultMovement {
+  id: string;
+  org_id: string;
+  kind: VaultMovementKind;
+  /** The vault it leaves, or for a deposit the one it enters. */
+  vault: VaultName;
+  /** Always AUD, always positive. The kind says which way it went. */
+  amount: number;
+  /** Pesos per AUD on the day, on a transfer. Recorded, never recalculated. */
+  rate: number | null;
+  amount_cop: number | null;
+  occurred_on: string;
+  reason: string | null;
+  note: string | null;
+  recorded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Where the saving stands, worked out from the closed weeks and the movements. */
+export interface VaultStatus {
+  /** Confirmed at close, summed over every closed week of the business. */
+  from_weeks: number;
+  weeks_closed: number;
+  transferred_to_col: number;
+  withdrawn_aus: number;
+  withdrawn_col: number;
+  deposited_aus: number;
+  deposited_col: number;
+  /** Loan payments taken out of each vault. They live on the payment itself. */
+  loans_paid_aus: number;
+  loans_paid_col: number;
+  /** Which loans that money went to, so the figure can be read as a story. */
+  loans_paid: {
+    loan_id: string;
+    name: string;
+    aus: number;
+    col: number;
+    total: number;
+    payments: number;
+  }[];
+  /** How many transfers have gone to Colombia, and the pesos they bought. */
+  transfers_to_col: number;
+  sent_cop: number;
+  /** from_weeks + deposits - withdrawals - what was sent to Colombia. */
+  aus: number;
+  /** What was sent, plus deposits there, minus what came back out. */
+  col: number;
+  /** aus + col. The saving, as it really stands today. */
+  total: number;
+  /** The pesos sitting in Colombia, from the rates of the days they were sent. */
+  col_cop: number;
+  /** What the closed weeks asked for, so the vault can be read against the plan. */
+  target_so_far: number;
+}
+
+/**
+ * One line of the vault's history, whatever kind of thing it was.
+ *
+ * A loan paid out of the vault is not a `vault_movement`: it is a
+ * `loan_payment` that says which vault paid for it, so the loan and the vault
+ * read one record. It still belongs on this list, because from the vault's side
+ * it is money that left on a day.
+ */
+export interface VaultEntry {
+  id: string;
+  kind: VaultMovementKind | "loan_payment";
+  vault: VaultName;
+  amount: number;
+  rate: number | null;
+  amount_cop: number | null;
+  occurred_on: string;
+  reason: string | null;
+  note: string | null;
+  recorded_by: string | null;
+  /** The loan it paid, when it is a loan payment. */
+  loan_id: string | null;
 }
 
 export interface AgentKey {

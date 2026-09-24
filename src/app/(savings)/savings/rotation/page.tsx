@@ -3,7 +3,7 @@ import { listExpenseItems } from "@/lib/data/expenses";
 import { awesomeForPage } from "@/lib/data/org";
 import { lastServiceDates } from "@/lib/data/weeks";
 import { todayInSydney } from "@/lib/format";
-import { aud, isLongerCycle, nextDueOn } from "@/lib/savings";
+import { appliesToWeek, aud, isLongerCycle, nextDueOn } from "@/lib/savings";
 import { RotationBoard, type CycleRow } from "./rotation-board";
 
 export default async function SavingsRotationPage() {
@@ -39,7 +39,12 @@ export default async function SavingsRotationPage() {
   // The standing weekly costs only. Loans are deliberately not on this screen:
   // it answers what a normal week takes in and what it costs, and the loans are
   // paid out of what is left, which is a different question on another page.
-  const expenses = items.reduce((sum, i) => sum + i.weekly_amount, 0);
+  // As of today: a cost that has not started yet is not part of what a normal
+  // week costs right now, and counting it would make this week look dearer than
+  // it is.
+  const expenses = items
+    .filter((i) => appliesToWeek(i, today))
+    .reduce((sum, i) => sum + i.weekly_amount, 0);
 
   const active = clients.filter((c) => c.is_active);
   const rate = (c: (typeof active)[number]) => c.default_rate ?? 0;
