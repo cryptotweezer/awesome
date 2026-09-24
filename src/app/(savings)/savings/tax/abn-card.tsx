@@ -143,11 +143,10 @@ export function AbnCard({
           count={issuer.deductions.length}
         />
         <div className="ml-auto flex flex-wrap gap-2">
+          {/* Only the form. The list is behind its own toggle, because it grows
+              all year and nobody adding one expense wants to scroll past forty. */}
           <button
-            onClick={() => {
-              setOpen("expenses");
-              setAdding(true);
-            }}
+            onClick={() => setAdding(true)}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             + Expense
@@ -168,11 +167,14 @@ export function AbnCard({
       {open === "invoices" && <Invoices rows={issuer.invoice_list} />}
 
       {open === "expenses" && (
-        <Deductions
-          issuer={issuer}
+        <Deductions issuer={issuer} showAdd={!adding} onAdd={() => setAdding(true)} />
+      )}
+
+      {/* Independent of either list: the form opens on its own. */}
+      {adding && (
+        <DeductionForm
+          issuerId={issuer.id}
           today={today}
-          adding={adding}
-          onAdd={() => setAdding(true)}
           onClose={() => setAdding(false)}
         />
       )}
@@ -270,16 +272,13 @@ function Invoices({ rows }: { rows: TaxIssuer["invoice_list"] }) {
 /** What the accountant takes off, and the form to add to it. */
 function Deductions({
   issuer,
-  today,
-  adding,
+  showAdd,
   onAdd,
-  onClose,
 }: {
   issuer: TaxIssuer;
-  today: string;
-  adding: boolean;
+  /** Hidden while the form is already open. */
+  showAdd: boolean;
   onAdd: () => void;
-  onClose: () => void;
 }) {
   return (
     <div className="mt-3">
@@ -343,13 +342,7 @@ function Deductions({
         </div>
       )}
 
-      {adding ? (
-        <DeductionForm
-          issuerId={issuer.id}
-          today={today}
-          onClose={onClose}
-        />
-      ) : (
+      {showAdd && (
         <button
           onClick={onAdd}
           className="mt-3 w-full rounded-lg border border-dashed border-slate-300 py-2 text-xs font-medium text-slate-400 transition hover:border-slate-400 hover:text-slate-600 dark:border-slate-700 dark:text-slate-500 dark:hover:border-slate-600 dark:hover:text-slate-300"

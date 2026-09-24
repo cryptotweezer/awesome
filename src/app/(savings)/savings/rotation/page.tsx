@@ -1,39 +1,108 @@
 import { listClients } from "@/lib/data/clients";
 import { listExpenseItems } from "@/lib/data/expenses";
 import { awesomeForPage } from "@/lib/data/org";
-import { lastServiceDates } from "@/lib/data/weeks";
+import { currentPlan, weeksOf } from "@/lib/data/savings-plan";
+import {
+  addDays,
+  entriesAndExpensesFor,
+  lastServiceDates,
+  listWeeks,
+  weekIndexFor,
+} from "@/lib/data/weeks";
 import { todayInSydney } from "@/lib/format";
 import { appliesToWeek, aud, isLongerCycle, nextDueOn } from "@/lib/savings";
+import type { WeekEntry } from "@/lib/types";
 import { RotationBoard, type CycleRow } from "./rotation-board";
 
 export default async function SavingsRotationPage() {
   const org = await awesomeForPage();
   const today = todayInSydney();
-  const [clients, items, lastDone] = await Promise.all([
+  const [clients, items, lastDone, plan, weeks] = await Promise.all([
     listClients(org.id),
     listExpenseItems(org.id, { activeOnly: true }),
     lastServiceDates(org.id),
+    // The plan is what turns a date into a week: which week of the rotation it
+    // is, and whether that week has been opened yet.
+    currentPlan(org.id, today),
+    listWeeks(org.id),
   ]);
+
+  const byStart = new Map(weeks.map((w) => [w.week_start, w]));
+  const planWeeks = plan ? weeksOf(plan) : 0;
+
+  /**
+   * The week of the plan a date falls in.
+   *
+   * Null outside the plan: before it starts, after its last week, or when there
+   * is no plan running. A monthly client due in a week nobody has planned yet is
+   * an honest gap, not a week to invent.
+   */
+  function weekFor(date: string) {
+    if (!plan || date < plan.starts_on || date > plan.ends_on) return null;
+    const index = weekIndexFor(plan.starts_on, date);
+    if (index < 1 || index > planWeeks) return null;
+    const start = addDays(plan.starts_on, (index - 1) * 7);
+    const week = byStart.get(start) ?? null;
+    return {
+      week_start: start,
+      week_end: addDays(start, 6),
+      // The rotation alternates from the plan's first week, the same way
+      // `ensureWeeks` numbers them.
+      rotation_week: index % 2 === 1 ? 1 : 2,
+      week_id: week?.id ?? null,
+    };
+  }
 
   // The clients the two-week rotation cannot hold: monthly, every N weeks.
   // Their date is counted from the last service rather than stored, so it can
   // never disagree with what actually happened.
-  const cycles: CycleRow[] = clients
-    .filter((c) => c.is_active && isLongerCycle(c))
-    .map((c) => {
-      const last = lastDone.get(c.id) ?? null;
-      const due = last ? nextDueOn(c, last) : null;
-      return {
-        id: c.id,
-        name: c.name,
-        cadence: c.cadence,
-        cadence_weeks: c.cadence_weeks,
-        rate: c.default_rate ?? 0,
-        last_service_on: last,
-        next_due_on: due,
-        overdue: due !== null && due < today,
-      };
-    })
+  const longer = clients.filter((c) => c.is_active && isLongerCycle(c));
+
+  const placed = longer.map((c) => {
+    const last = lastDone.get(c.id) ?? null;
+    const due = last ? nextDueOn(c, last) : null;
+    return { client: c, last, due, week: due ? weekFor(due) : null };
+  });
+
+  // Whether the week their date falls in already carries a line for them, which
+  // is what says the money is expected there. One query for every week involved,
+  // not one per client.
+  const weekIds = [
+    ...new Set(
+      placed
+        .map((p) => p.week?.week_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const bulk =
+    weekIds.length > 0
+      ? await entriesAndExpensesFor(org.id, weekIds)
+      : {
+          entries: new Map<string, WeekEntry[]>(),
+          expenses: new Map<string, unknown[]>(),
+        };
+
+  const cycles: CycleRow[] = placed
+    .map(({ client: c, last, due, week }) => ({
+      id: c.id,
+      name: c.name,
+      cadence: c.cadence,
+      cadence_weeks: c.cadence_weeks,
+      rate: c.default_rate ?? 0,
+      last_service_on: last,
+      next_due_on: due,
+      overdue: due !== null && due < today,
+      week_start: week?.week_start ?? null,
+      week_end: week?.week_end ?? null,
+      rotation_week: week?.rotation_week ?? null,
+      week_id: week?.week_id ?? null,
+      scheduled: Boolean(
+        week?.week_id &&
+          (bulk.entries.get(week.week_id) ?? []).some(
+            (e) => e.client_id === c.id,
+          ),
+      ),
+    }))
     .sort((a, b) => (a.next_due_on ?? "9").localeCompare(b.next_due_on ?? "9"));
 
   // The standing weekly costs only. Loans are deliberately not on this screen:

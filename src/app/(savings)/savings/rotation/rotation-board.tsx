@@ -132,6 +132,19 @@ export type CycleRow = {
   /** Counted from that day. Null until there is a first service to count from. */
   next_due_on: string | null;
   overdue: boolean;
+  /**
+   * The week of the plan that date falls in: which week to actually do them in,
+   * and where the money is expected. Null when there is no date yet, or when it
+   * falls outside the plan that is running.
+   */
+  week_start: string | null;
+  week_end: string | null;
+  /** 1 or 2, the side of the rotation that week is. */
+  rotation_week: number | null;
+  /** The week's id, once it has been opened. Future weeks do not exist yet. */
+  week_id: string | null;
+  /** Whether that week already carries a line for them. */
+  scheduled: boolean;
 };
 
 /**
@@ -156,11 +169,11 @@ function LongerCycle({ rows }: { rows: CycleRow[] }) {
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
         <div>
           <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            On a longer cycle
+            Monthly and longer
           </h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
             Counted from their last service, then placed in the week their date
-            falls in.
+            falls in. Do one on another day and the next one counts from there.
           </p>
         </div>
         <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -207,6 +220,40 @@ function LongerCycle({ rows }: { rows: CycleRow[] }) {
               )}
             </span>
 
+            {/* Which week to do them in, which is the question this list exists
+                to answer. A week that has been opened is a link; one still in
+                the future is a date, because it does not exist yet. */}
+            <span className="w-44 text-xs">
+              {r.week_start === null ? (
+                <span className="text-slate-400 dark:text-slate-500">–</span>
+              ) : (
+                <>
+                  {r.week_id ? (
+                    <Link
+                      href={`/savings/weeks/${r.week_id}`}
+                      className="font-medium text-slate-700 underline-offset-2 hover:underline dark:text-slate-300"
+                    >
+                      Week {r.rotation_week}
+                    </Link>
+                  ) : (
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      Week {r.rotation_week}
+                    </span>
+                  )}
+                  <span className="text-slate-400 dark:text-slate-500">
+                    {" "}
+                    {shortDate(r.week_start)}
+                    {r.week_end ? ` to ${shortDate(r.week_end)}` : ""}
+                  </span>
+                  {r.scheduled && (
+                    <span className="ml-1 text-emerald-600 dark:text-emerald-400">
+                      · on it
+                    </span>
+                  )}
+                </>
+              )}
+            </span>
+
             <span className="w-20 text-right text-sm text-slate-600 dark:text-slate-400">
               {aud(r.rate)}
             </span>
@@ -216,8 +263,10 @@ function LongerCycle({ rows }: { rows: CycleRow[] }) {
 
       <p className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800 dark:text-slate-500">
         A date that has gone by without the work being done stays here as
-        overdue: add the service to the week it happened in and the next date
-        counts from there.
+        overdue rather than being pasted into every later week, which would count
+        the money twice. Add the service to the week it happened in and the next
+        date counts from there. &quot;On it&quot; means that week already has a
+        line for them, with their money expected in it.
       </p>
     </section>
   );
