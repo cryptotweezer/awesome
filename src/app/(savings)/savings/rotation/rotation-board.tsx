@@ -205,11 +205,50 @@ function useBoard(): DragBoard {
   return ctx;
 }
 
-/** Where the dragged client lands: before `index`, or at the end for null. */
-function insertAt(ids: string[], movedId: string, index: number | null) {
+/**
+ * The day's new order: `moved` goes in front of `before`, or last for null.
+ *
+ * By the id it was dropped on and never by an index. An index is read from the
+ * list as it looks NOW, and the moment the dragged client is taken out of it
+ * every index below them shifts by one, so dropping something onto its
+ * neighbour below moved it nowhere.
+ */
+function insertBefore(
+  ids: string[],
+  movedId: string,
+  beforeId: string | null,
+): string[] {
+  // Dropped on itself: nothing was asked for.
+  if (beforeId === movedId) return ids;
   const without = ids.filter((i) => i !== movedId);
-  const at = index === null ? without.length : Math.min(index, without.length);
+  if (beforeId === null) return [...without, movedId];
+  const at = without.indexOf(beforeId);
+  if (at === -1) return [...without, movedId];
   return [...without.slice(0, at), movedId, ...without.slice(at)];
+}
+
+/**
+ * What is being dragged, read from the drag itself.
+ *
+ * The board also keeps it in state for the highlight, but a drop must not
+ * depend on that: a state update and a native drag are two different clocks,
+ * and a drop that arrives first would be ignored. The drag carries its own
+ * answer.
+ */
+function draggedFrom(
+  e: React.DragEvent,
+  fallback: Dragging,
+): Dragging {
+  try {
+    const raw = e.dataTransfer.getData("text/plain");
+    if (raw) {
+      const parsed = JSON.parse(raw) as Dragging;
+      if (parsed && parsed.id) return parsed;
+    }
+  } catch {
+    // Not ours, or the browser would not hand it over. The state still knows.
+  }
+  return fallback;
 }
 
 export type CycleRow = {
@@ -476,27 +515,43 @@ function Day({
 
   const ids = clients.map((c) => c.id);
   const dragging = board.dragging;
+  const [beforeId, setBeforeId] = useState<string | null>(null);
 
-  // The whole day is a drop zone: dropping on the day itself puts the client at
-  // the end of it, dropping on a client puts them in front of that one.
-  const dropHere = (index: number | null) => {
-    if (!dragging) return;
+  // The whole day is a drop zone: dropping on the day itself puts the client
+  // last, dropping on a client puts them in front of that one.
+  const dropHere = (e: React.DragEvent, before: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
     setOver(false);
-    board.drop(week, day, insertAt(ids, dragging.id, index), dragging);
+    setBeforeId(null);
+    const moved = draggedFrom(e, dragging);
+    if (!moved) return;
+    const order = insertBefore(ids, moved.id, before);
+    // Nothing changed and it did not come from another day: no write.
+    if (moved.week === week && moved.day === day && order.join() === ids.join()) {
+      return;
+    }
+    board.drop(week, day, order, moved);
   };
 
   return (
     <div
+      // Always accepted, never conditional on what React knows yet: a drop zone
+      // that forgets to preventDefault on dragover simply refuses the drop.
       onDragOver={(e) => {
-        if (!dragging) return;
         e.preventDefault();
+        // Without this some browsers draw the "no drop" cursor and then refuse
+        // the drop entirely.
+        e.dataTransfer.dropEffect = "move";
         setOver(true);
       }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        dropHere(null);
+      onDragLeave={(e) => {
+        // Moving onto a child fires a leave on the parent; ignore it.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setOver(false);
+        setBeforeId(null);
       }}
+      onDrop={(e) => dropHere(e, null)}
       className={`min-h-[9rem] p-3 transition ${
         over
           ? "bg-sky-50 dark:bg-sky-950/40"
@@ -515,29 +570,43 @@ function Day({
       </div>
 
       <ul className="mt-2 space-y-1.5">
-        {clients.map((c, i) => (
+        {clients.map((c) => (
           <li
             key={c.id}
             draggable
             onDragStart={(e) => {
               e.dataTransfer.effectAllowed = "move";
-              // Something has to be set or Firefox refuses to start the drag.
-              e.dataTransfer.setData("text/plain", c.id);
-              board.start({ id: c.id, week, day });
+              // The drag carries where it came from, so a drop never has to wait
+              // for React to have caught up. Something must be set here or
+              // Firefox refuses to start the drag at all.
+              const from: Dragging = { id: c.id, week, day };
+              e.dataTransfer.setData("text/plain", JSON.stringify(from));
+              board.start(from);
             }}
-            onDragEnd={board.end}
+            onDragEnd={() => {
+              board.end();
+              setBeforeId(null);
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOver(false);
+              setBeforeId(c.id);
+            }}
             onDragOver={(e) => {
-              if (!dragging) return;
               e.preventDefault();
               e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+              setOver(false);
+              setBeforeId(c.id);
             }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              dropHere(i);
-            }}
-            className={`cursor-grab active:cursor-grabbing ${
+            onDrop={(e) => dropHere(e, c.id)}
+            className={`cursor-grab rounded-lg active:cursor-grabbing ${
               dragging?.id === c.id ? "opacity-40" : ""
+            } ${
+              beforeId === c.id && dragging?.id !== c.id
+                ? "ring-2 ring-sky-400 dark:ring-sky-500"
+                : ""
             }`}
           >
             <ClientChip client={c} week={week} />
