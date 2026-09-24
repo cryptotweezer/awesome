@@ -863,8 +863,8 @@ create table if not exists awesome.tax_deductions (
   constraint tax_deductions_description_not_blank
     check (btrim(description) <> ''),
   constraint tax_deductions_category_check check (category in (
-    'vehicle', 'tools', 'equipment', 'supplies', 'phone_internet',
-    'insurance', 'fees', 'travel', 'clothing', 'other'
+    'vehicle', 'tools', 'equipment', 'supplies', 'rags_washing',
+    'phone_internet', 'insurance', 'clothing', 'other'
   )),
   constraint tax_deductions_issuer_fkey foreign key (issuer_id)
     references awesome.issuers(id) on delete cascade,

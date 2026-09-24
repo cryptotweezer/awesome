@@ -36,10 +36,9 @@ export const DEDUCTION_CATEGORIES: {
   { value: "tools", label: "Tools" },
   { value: "equipment", label: "Equipment" },
   { value: "supplies", label: "Supplies" },
+  { value: "rags_washing", label: "Rags washing" },
   { value: "phone_internet", label: "Phone and internet" },
   { value: "insurance", label: "Insurance" },
-  { value: "fees", label: "Fees" },
-  { value: "travel", label: "Travel" },
   { value: "clothing", label: "Clothing" },
   { value: "other", label: "Other" },
 ];

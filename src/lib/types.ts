@@ -560,10 +560,9 @@ export type DeductionCategory =
   | "tools"
   | "equipment"
   | "supplies"
+  | "rags_washing"
   | "phone_internet"
   | "insurance"
-  | "fees"
-  | "travel"
   | "clothing"
   | "other";
 
