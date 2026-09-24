@@ -145,6 +145,67 @@ export async function setClientRotation(
   return updateClient(orgId, id, patch);
 }
 
+/**
+ * Put a day of one rotation week in a given order, in one go.
+ *
+ * The caller sends the day's whole list as it should now read, rather than
+ * "move this one up": an order written from a complete list cannot end up with
+ * two clients on the same position or a gap where a drag was interrupted, which
+ * is exactly what a relative move does when two of them happen at once.
+ *
+ * Dragging a client out of one week and into the other MOVES them, unless they
+ * are in both weeks already: somebody done every week belongs to both, so
+ * changing their day in week 2 must not take them out of week 1.
+ */
+export async function reorderRotation(
+  orgId: string,
+  input: {
+    week: 1 | 2;
+    day: number;
+    /** The day's clients, in the order they should be done. */
+    ids: string[];
+    /** The client that was just dragged, when the drag crossed a week. */
+    moved?: string | null;
+    from?: 1 | 2 | null;
+  },
+): Promise<void> {
+  const { week, day, ids, moved, from } = input;
+  const supabase = createAdminClient();
+
+  if (moved && from && from !== week) {
+    const { data: client } = await supabase
+      .from("clients")
+      .select("in_week_1, in_week_2")
+      .eq("org_id", orgId)
+      .eq("id", moved)
+      .maybeSingle();
+    const inBoth = Boolean(client?.in_week_1 && client?.in_week_2);
+    if (!inBoth) {
+      await updateClient(
+        orgId,
+        moved,
+        from === 1
+          ? { in_week_1: false, week_1_day: null, week_1_seq: null }
+          : { in_week_2: false, week_2_day: null, week_2_seq: null },
+      );
+    }
+  }
+
+  // A handful of rows per day, so one update each is clearer than a bulk upsert
+  // that would have to carry every other column of the client.
+  await Promise.all(
+    ids.map((id, i) =>
+      updateClient(
+        orgId,
+        id,
+        week === 1
+          ? { in_week_1: true, week_1_day: day, week_1_seq: i + 1 }
+          : { in_week_2: true, week_2_day: day, week_2_seq: i + 1 },
+      ),
+    ),
+  );
+}
+
 export async function updateClient(
   orgId: string,
   id: string,

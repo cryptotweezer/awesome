@@ -1,10 +1,21 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import {
+  createContext,
+  useActionState,
+  useContext,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import type { ClientWithIssuer } from "@/lib/types";
 import { WEEKDAYS, aud, shortDate } from "@/lib/savings";
-import { setRotationAction, type ActionState } from "./actions";
+import {
+  reorderRotationAction,
+  setRotationAction,
+  type ActionState,
+} from "./actions";
 
 const initial: ActionState = { ok: false };
 
@@ -82,8 +93,49 @@ export function RotationBoard({
     (c) => !c.in_week_1 && !c.in_week_2 && !onCycle.has(c.id),
   );
 
+  const [dragging, setDragging] = useState<Dragging>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const board: DragBoard = {
+    dragging,
+    start: setDragging,
+    end: () => setDragging(null),
+    pending,
+    error,
+    drop: (week, day, ids, moved) => {
+      setDragging(null);
+      if (!moved) return;
+      // Dropped where it already was, in the same place: nothing happened.
+      const form = new FormData();
+      form.set("week", String(week));
+      form.set("day", String(day));
+      form.set("ids", ids.join(","));
+      form.set("moved", moved.id);
+      if (moved.week !== week) form.set("from", String(moved.week));
+      setError(null);
+      startTransition(async () => {
+        const result = await reorderRotationAction({ ok: false }, form);
+        if (result.error) setError(result.error);
+      });
+    },
+  };
+
   return (
+    <Board.Provider value={board}>
     <div className="space-y-6">
+      {error && (
+        <p className="rounded-2xl bg-red-50 px-5 py-3 text-sm text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900">
+          {error}
+        </p>
+      )}
+      {/* The order is written the moment the chip is dropped, so the only thing
+          to say is that it is being written. */}
+      {pending && (
+        <p className="text-xs font-medium text-slate-400 dark:text-slate-500">
+          Saving the order…
+        </p>
+      )}
       <Week n={1} clients={active} expenses={expenses} />
       <Week n={2} clients={active} expenses={expenses} />
 
@@ -118,7 +170,46 @@ export function RotationBoard({
         )}
       </section>
     </div>
+    </Board.Provider>
   );
+}
+
+/**
+ * Dragging a client from one day to another.
+ *
+ * Native drag and drop, no library: a day is a drop zone and a client is a
+ * draggable, which is the whole of it. The select on every chip stays exactly as
+ * it was, because dragging does not work on a phone and a board that can only be
+ * arranged on a laptop would be a board Mavi cannot use.
+ *
+ * What the server is told is never "move this one up", it is the day's whole new
+ * order, so two drags at once cannot leave two clients on the same position.
+ */
+type Dragging = { id: string; week: 1 | 2; day: number | null } | null;
+
+type DragBoard = {
+  dragging: Dragging;
+  start: (d: Dragging) => void;
+  end: () => void;
+  /** Write a day's new order. `ids` is that day, in full, as it should read. */
+  drop: (week: 1 | 2, day: number, ids: string[], moved: Dragging) => void;
+  pending: boolean;
+  error: string | null;
+};
+
+const Board = createContext<DragBoard | null>(null);
+
+function useBoard(): DragBoard {
+  const ctx = useContext(Board);
+  if (!ctx) throw new Error("A rotation chip outside the board");
+  return ctx;
+}
+
+/** Where the dragged client lands: before `index`, or at the end for null. */
+function insertAt(ids: string[], movedId: string, index: number | null) {
+  const without = ids.filter((i) => i !== movedId);
+  const at = index === null ? without.length : Math.min(index, without.length);
+  return [...without.slice(0, at), movedId, ...without.slice(at)];
 }
 
 export type CycleRow = {
@@ -272,6 +363,15 @@ function LongerCycle({ rows }: { rows: CycleRow[] }) {
   );
 }
 
+/**
+ * One side of the rotation, day by day.
+ *
+ * Clients can be dragged between the days and between the two weeks. Dropping
+ * on a client puts them in front of it, dropping on the day puts them last, and
+ * the order is the order of the round. Dragging into the other week MOVES them,
+ * unless they are in both weeks already, in which case they belong to both and
+ * only that week's day changes.
+ */
 function Week({
   n,
   clients,
@@ -371,9 +471,38 @@ function Day({
 }) {
   const [adding, setAdding] = useState(false);
   const total = clients.reduce((sum, c) => sum + rate(c), 0);
+  const board = useBoard();
+  const [over, setOver] = useState(false);
+
+  const ids = clients.map((c) => c.id);
+  const dragging = board.dragging;
+
+  // The whole day is a drop zone: dropping on the day itself puts the client at
+  // the end of it, dropping on a client puts them in front of that one.
+  const dropHere = (index: number | null) => {
+    if (!dragging) return;
+    setOver(false);
+    board.drop(week, day, insertAt(ids, dragging.id, index), dragging);
+  };
 
   return (
-    <div className="min-h-[9rem] bg-white p-3 dark:bg-slate-900">
+    <div
+      onDragOver={(e) => {
+        if (!dragging) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        dropHere(null);
+      }}
+      className={`min-h-[9rem] p-3 transition ${
+        over
+          ? "bg-sky-50 dark:bg-sky-950/40"
+          : "bg-white dark:bg-slate-900"
+      }`}
+    >
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
@@ -386,8 +515,31 @@ function Day({
       </div>
 
       <ul className="mt-2 space-y-1.5">
-        {clients.map((c) => (
-          <li key={c.id}>
+        {clients.map((c, i) => (
+          <li
+            key={c.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "move";
+              // Something has to be set or Firefox refuses to start the drag.
+              e.dataTransfer.setData("text/plain", c.id);
+              board.start({ id: c.id, week, day });
+            }}
+            onDragEnd={board.end}
+            onDragOver={(e) => {
+              if (!dragging) return;
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dropHere(i);
+            }}
+            className={`cursor-grab active:cursor-grabbing ${
+              dragging?.id === c.id ? "opacity-40" : ""
+            }`}
+          >
             <ClientChip client={c} week={week} />
           </li>
         ))}
@@ -469,6 +621,14 @@ function ClientChip({
 
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-medium text-slate-900 dark:text-slate-100">
+          {/* The grip is the only hint that a chip can be dragged. Everything
+              still works without it: the select below moves them too. */}
+          <span
+            aria-hidden="true"
+            className="mr-1 select-none text-slate-400 dark:text-slate-500"
+          >
+            ⠿
+          </span>
           {client.name}
         </span>
         <span className="text-[11px] text-slate-500 dark:text-slate-400">
